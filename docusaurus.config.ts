@@ -11,6 +11,17 @@ const siteUrl =
 const baseUrl =
   process.env.DOCS_BASE_URL ??
   (isGitHubPages ? '/qingflow-help-center/' : '/');
+const docsContentSource = (process.env.DOCS_CONTENT_SOURCE ?? 'outline')
+  .trim()
+  .toLowerCase();
+
+if (!['outline', 'legacy'].includes(docsContentSource)) {
+  throw new Error(
+    `Unsupported DOCS_CONTENT_SOURCE: ${docsContentSource}. Expected "outline" or "legacy".`,
+  );
+}
+
+const useLegacyContent = docsContentSource === 'legacy';
 
 const config: Config = {
   title: '轻流帮助中心',
@@ -47,10 +58,14 @@ const config: Config = {
       {
         docs: {
           routeBasePath: 'docs',
-          sidebarPath: './sidebars.ts',
-          editUrl:
-            process.env.GITHUB_EDIT_URL ??
-            'https://github.com/nonepointer666/qingflow-help-center/tree/main/',
+          sidebarPath: useLegacyContent
+            ? './sidebars.ts'
+            : './sidebars.generated.ts',
+          exclude: useLegacyContent ? ['generated/**'] : ['migrated/**'],
+          editUrl: useLegacyContent
+            ? process.env.GITHUB_EDIT_URL ??
+              'https://github.com/nonepointer666/qingflow-help-center/tree/main/'
+            : undefined,
           showLastUpdateTime: false,
           showLastUpdateAuthor: false,
         },

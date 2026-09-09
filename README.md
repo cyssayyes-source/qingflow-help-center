@@ -1,8 +1,9 @@
 # Qingflow Help Center
 
-This repository implements **Phase 1** of a self-hosted help center based on:
+This repository implements a self-hosted help center based on:
 
-- `GitHub` for code and Markdown content storage
+- `Outline` as the production content source
+- `GitHub` for application code, stable route metadata, and the legacy snapshot
 - `Docusaurus` for the documentation site and information architecture
 - `Typesense` for self-hosted search
 
@@ -24,6 +25,14 @@ npm install
 npm start
 ```
 
+`npm start` requires `OUTLINE_API_TOKEN`, synchronizes the configured Outline
+collection, and then starts Docusaurus with the generated content. To work
+against the retained legacy snapshot without contacting Outline, run:
+
+```bash
+npm run start:legacy
+```
+
 ## Build
 
 ```bash
@@ -32,13 +41,55 @@ npm run build
 
 This will:
 
+- synchronize the `售后知识库` collection from Outline
 - build the Docusaurus site into `build/`
 - generate `.tmp/search-records.json` for Typesense indexing
 
+Use `npm run build:legacy` for an offline build from `docs/migrated`.
+
+## Outline content sync
+
+The production source URL is `https://outline.dev.oalite.com`. Configure a
+read-only `OUTLINE_API_TOKEN` in the environment and run:
+
+```bash
+npm run content:sync
+```
+
+The sync uses `POST /api/collections.list`, reads the Outline document tree and
+Markdown content, and writes disposable output to `docs/generated/` and
+`sidebars.generated.ts`. These generated files are intentionally ignored by
+Git. Images, videos, and attachments are not downloaded; their references are
+kept as absolute Outline URLs.
+
+Existing public routes are bound to Outline document IDs in
+`data/outline-route-map.json`. From an environment that can access Outline, run
+the following once and commit the resulting route map:
+
+```bash
+npm run content:routes:bootstrap
+```
+
+Normal Outline syncs fail closed until this initial route map has been committed.
+Ambiguous legacy matches fail and are reported in
+`.tmp/outline-route-conflicts.json`. Resolve those entries explicitly in the
+route map before publishing. Never put an API token in this repository or in a
+command committed to shell history.
+
+Container builds also require the token as a BuildKit secret so that it is not
+stored in an image layer:
+
+```bash
+docker build --secret id=outline_api_token,env=OUTLINE_API_TOKEN .
+```
+
 ## GitHub Pages deployment
 
-Every update to `main` is validated, built, and deployed by
-`.github/workflows/docs-ci.yml`. The published site is available at:
+Every update to `main` is synchronized, validated, built, and deployed by
+`.github/workflows/docs-ci.yml`. Production builds run on a self-hosted runner
+whose outbound IP must be allowed by Outline. Pull requests use the retained
+legacy snapshot and do not receive the Outline secret. The published site is
+available at:
 
 `https://nonepointer666.github.io/qingflow-help-center/`
 
@@ -69,7 +120,7 @@ npm run search:push
 ```text
 docs/                  Markdown and MDX content
 src/pages/             Branded landing page and search page
-scripts/               Search record generation and Typesense sync
+scripts/               Outline sync, search record generation, and Typesense sync
 typesense/schema/      Collection schema reference
 .github/workflows/     CI pipeline
 ```
@@ -78,6 +129,6 @@ typesense/schema/      Collection schema reference
 
 1. Connect a real Typesense instance and search-only API key
 2. Add synonym rules and ranking strategy
-3. Introduce Decap CMS for browser-based editing
+3. Add scheduled Outline synchronization and content freshness monitoring
 4. Add OpenAPI-driven API reference pages
 5. Add AI answer generation with source citations

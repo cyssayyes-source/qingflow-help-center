@@ -13,9 +13,10 @@ import {
 import path from 'node:path';
 import {Transform, Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
+import {getContentPaths} from './lib/content-source.mjs';
 
 const cwd = process.cwd();
-const docsRoot = path.join(cwd, 'docs', 'migrated');
+const {docsRoot, source: contentSource} = getContentPaths(cwd);
 const assetsRoot = path.join(cwd, 'static', 'doc-assets');
 const manifestFile = path.join(cwd, 'data', 'doc-assets.json');
 const reportFile = path.join(cwd, 'data', 'doc-assets-report.json');
@@ -497,6 +498,11 @@ async function checkAssets() {
 }
 
 const command = process.argv[2] ?? 'check';
+if (contentSource !== 'legacy' && command !== 'check') {
+  throw new Error(
+    `Asset ${command} is disabled for Outline content because remote media must not be downloaded.`,
+  );
+}
 if (command === 'probe') {
   await probeAssets();
 } else if (command === 'migrate') {

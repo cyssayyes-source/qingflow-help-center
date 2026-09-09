@@ -17,7 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate-and-build:
+  validate-pull-request:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,32 +30,18 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Configure GitHub Pages
-        if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@v6
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npm test
 
-      - name: Build site and search records
-        env:
-          GITHUB_PAGES: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
-          TYPESENSE_HOST: ${{ secrets.TYPESENSE_HOST }}
-          TYPESENSE_SEARCH_API_KEY: ${{ secrets.TYPESENSE_SEARCH_API_KEY }}
-          TYPESENSE_COLLECTION: ${{ secrets.TYPESENSE_COLLECTION }}
-        run: npm run build
-
-      - name: Upload GitHub Pages artifact
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: build
+      - name: Build with retained legacy content
+        run: npm run build:legacy
 
       - name: Upload build artifact
-        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v6
         with:
           name: qingflow-help-center-build
@@ -62,10 +49,63 @@ jobs:
             build
             .tmp/search-records.json
 
+  validate-and-build:
+    if: github.event_name != 'pull_request'
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Sync Outline content
+        env:
+          OUTLINE_URL: https://outline.dev.oalite.com
+          OUTLINE_COLLECTION: 售后知识库
+          OUTLINE_API_TOKEN: ${{ secrets.OUTLINE_API_TOKEN }}
+        run: npm run content:sync
+
+      - name: Build synchronized site
+        env:
+          GITHUB_PAGES: 'true'
+          TYPESENSE_HOST: ${{ secrets.TYPESENSE_HOST }}
+          TYPESENSE_SEARCH_API_KEY: ${{ secrets.TYPESENSE_SEARCH_API_KEY }}
+          TYPESENSE_COLLECTION: ${{ secrets.TYPESENSE_COLLECTION }}
+        run: npm run build:outline
+
+      - name: Upload search records for Typesense
+        uses: actions/upload-artifact@v6
+        with:
+          name: search-records-${{ github.sha }}
+          path: .tmp/search-records.json
+          retention-days: 1
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build
+
   deploy-pages:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    needs: validate-and-build
+    needs:
+      - validate-and-build
+      - sync-typesense
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -95,9 +135,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate search records
-        run: npm run build:index
+      - name: Download search records from site build
+        uses: actions/download-artifact@v6
+        with:
+          name: search-records-${{ github.sha }}
+          path: .tmp
 
       - name: Push records to Typesense
-        if: ${{ env.TYPESENSE_HOST != '' && env.TYPESENSE_ADMIN_API_KEY != '' }}
         run: npm run search:push

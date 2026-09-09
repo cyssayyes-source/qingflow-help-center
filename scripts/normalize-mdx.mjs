@@ -1,7 +1,8 @@
 import {readFile, readdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import {getContentPaths} from './lib/content-source.mjs';
 
-const docsRoot = path.join(process.cwd(), 'docs');
+const {docsRoot} = getContentPaths();
 
 async function getMarkdownFiles(dir) {
   const entries = await readdir(dir, {withFileTypes: true});

@@ -3,6 +3,8 @@
 
 # Production
 /build
+/docs/generated
+/sidebars.generated.ts
 
 # Generated files
 .docusaurus
@@ -16,6 +18,7 @@
 # Misc
 .DS_Store
 .env.local
+.env
 .env.development.local
 .env.test.local
 .env.production.local

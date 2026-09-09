@@ -1,9 +1,10 @@
 import {mkdir, readFile, readdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {pinyin} from 'pinyin-pro';
+import {getContentPaths} from './lib/content-source.mjs';
 
 const cwd = process.cwd();
-const docsRoot = path.join(cwd, 'docs', 'migrated');
+const {docsRoot, source: contentSource} = getContentPaths(cwd);
 const redirectsFile = path.join(cwd, 'data', 'legacy-url-redirects.json');
 const sourceRoots = [
   path.join(cwd, 'docusaurus.config.ts'),
@@ -215,6 +216,9 @@ async function checkRoutes() {
 }
 
 async function migrateRoutes() {
+  if (contentSource !== 'legacy') {
+    throw new Error('Route migration is only supported for DOCS_CONTENT_SOURCE=legacy.');
+  }
   const markdownFiles = (await getFiles(docsRoot))
     .filter((filePath) => filePath.endsWith('.mdx'))
     .sort();

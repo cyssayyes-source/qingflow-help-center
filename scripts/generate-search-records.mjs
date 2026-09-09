@@ -1,8 +1,9 @@
 import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import {getContentPaths} from './lib/content-source.mjs';
 
 const cwd = process.cwd();
-const docsRoot = path.join(cwd, 'docs');
+const {docsBaseRoot, docsRoot} = getContentPaths(cwd);
 const outputDir = path.join(cwd, '.tmp');
 const outputFile = path.join(outputDir, 'search-records.json');
 const publicOutputFile = path.join(cwd, 'static', 'search-records.json');
@@ -258,7 +259,7 @@ function inferTags(relativePath, attributes, title) {
   const fallbackTags = relativePath
     .replace(/\.(md|mdx)$/i, '')
     .split(path.sep)
-    .filter((part) => part && part !== 'migrated');
+    .filter((part) => part && !['migrated', 'generated'].includes(part));
   const tags = new Set(slugTags.length > 0 ? slugTags : fallbackTags);
   return Array.from(tags);
 }
@@ -331,7 +332,7 @@ async function main() {
   await rm(rawDocsDir, {recursive: true, force: true});
 
   for (const filePath of markdownFiles) {
-    const relativePath = path.relative(docsRoot, filePath);
+    const relativePath = path.relative(docsBaseRoot, filePath);
     const source = await readFile(filePath, 'utf8');
     const {attributes, body} = parseFrontMatter(source);
     const cleanBody = cleanMarkdown(body);

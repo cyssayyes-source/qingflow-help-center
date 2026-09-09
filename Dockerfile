@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # ============================================================
 # Stage 1: 构建静态站点
 # ============================================================
@@ -27,17 +29,23 @@ ARG TYPESENSE_HOST=""
 ARG TYPESENSE_COLLECTION=qingflow_help_docs
 ARG TYPESENSE_SEARCH_API_KEY=""
 ARG TYPESENSE_ENABLE_SEMANTIC=false
+ARG OUTLINE_URL=https://outline.dev.oalite.com
+ARG OUTLINE_COLLECTION=售后知识库
 
 ENV DOCS_URL=${DOCS_URL} \
     DOCS_BASE_URL=${DOCS_BASE_URL} \
     BUILD_COMMIT=${BUILD_COMMIT} \
+    DOCS_CONTENT_SOURCE=outline \
+    OUTLINE_URL=${OUTLINE_URL} \
+    OUTLINE_COLLECTION=${OUTLINE_COLLECTION} \
     TYPESENSE_HOST=${TYPESENSE_HOST} \
     TYPESENSE_COLLECTION=${TYPESENSE_COLLECTION} \
     TYPESENSE_SEARCH_API_KEY=${TYPESENSE_SEARCH_API_KEY} \
     TYPESENSE_ENABLE_SEMANTIC=${TYPESENSE_ENABLE_SEMANTIC}
 
-# 执行构建（生成搜索索引 + docusaurus build）
-RUN npm run build
+# Outline token is available only to this build step and is not persisted in an image layer.
+RUN --mount=type=secret,id=outline_api_token,required=true \
+    OUTLINE_API_TOKEN="$(cat /run/secrets/outline_api_token)" npm run build
 
 # ============================================================
 # Stage 2: Nginx 提供静态服务
