@@ -1,6 +1,7 @@
 import type {FormEvent, ReactNode} from 'react';
 import {useEffect, useRef, useState} from 'react';
 import Link from '@docusaurus/Link';
+import {useHistory} from '@docusaurus/router';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
@@ -111,6 +112,7 @@ const popularQuestions = [
 function HelpSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const searchPath = useBaseUrl('/search');
+  const history = useHistory();
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLowerCase();
   const matchedGuides = normalizedQuery
@@ -142,15 +144,22 @@ function HelpSearch() {
   }, []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (!query.trim()) {
-      event.preventDefault();
       inputRef.current?.focus();
+      return;
     }
+
+    history.push(`${searchPath}?q=${encodeURIComponent(query.trim())}`);
+  }
+
+  function preloadSearchPage() {
+    window.docusaurus?.preload(searchPath);
   }
 
   return (
     <div className={styles.searchShell}>
-      <form className={styles.searchBox} action={searchPath} onSubmit={handleSubmit}>
+      <form className={styles.searchBox} onSubmit={handleSubmit}>
         <Search aria-hidden="true" size={22} strokeWidth={2} />
         <input
           ref={inputRef}
@@ -158,6 +167,8 @@ function HelpSearch() {
           name="q"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onFocus={preloadSearchPage}
+          onMouseEnter={preloadSearchPage}
           placeholder="搜索功能、操作或问题"
           aria-label="搜索帮助文档"
           autoComplete="off"

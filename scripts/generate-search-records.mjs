@@ -206,8 +206,10 @@ function normalizeSearchText(value) {
 function cleanHeading(value) {
   return value
     .replace(/\s+#+\s*$/, '')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
     .replace(/[*_`~]/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .trim();
 }
 
@@ -235,16 +237,14 @@ function extractSections(body) {
 
   return headings
     .map((heading, index) => {
-      const nextHeading = headings
-        .slice(index + 1)
-        .find((candidate) => candidate.level <= heading.level);
+      const nextHeading = headings[index + 1];
       const endLine = nextHeading?.lineIndex ?? lines.length;
       return {
         ...heading,
-        body: lines.slice(heading.lineIndex, endLine).join('\n').trim(),
+        body: lines.slice(heading.lineIndex + 1, endLine).join('\n').trim(),
       };
     })
-    .filter((section) => section.title && normalizeContent(section.body));
+    .filter((section) => section.title && section.title !== '');
 }
 
 function cleanMarkdown(body) {
@@ -290,6 +290,22 @@ function buildSynonymKeywords(values, synonymGroups, sourceValues = values) {
   });
 
   return Array.from(keywords);
+}
+
+function buildBreadcrumb(category, frontMatterKeywords, title, sectionTitle) {
+  const parts = [category, ...frontMatterKeywords, title, sectionTitle]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean);
+  const breadcrumb = [];
+
+  parts.forEach((part) => {
+    const previous = breadcrumb[breadcrumb.length - 1];
+    if (normalizeSearchText(previous) !== normalizeSearchText(part)) {
+      breadcrumb.push(part);
+    }
+  });
+
+  return breadcrumb.join(' / ');
 }
 
 function slugifyHeading(value, usedSlugs) {
@@ -372,8 +388,9 @@ async function main() {
       doc_id: docId,
       record_type: 'document',
       title,
+      document_title: title,
       section: category,
-      breadcrumb: category,
+      breadcrumb: buildBreadcrumb(category, frontMatterKeywords, title),
       keywords,
       content,
       url: buildUrl(relativePath, attributes),
@@ -392,17 +409,18 @@ async function main() {
     const usedSlugs = new Set();
     extractSections(cleanBody).forEach((section, sectionIndex) => {
       const sectionKeywords = buildSynonymKeywords(
-        [title, section.title, category, ...tags, ...frontMatterKeywords],
+        [section.title],
         synonymGroups,
-        [title, section.title, category, section.body, ...tags, ...frontMatterKeywords],
+        [section.title, section.body],
       );
       records.push({
         id: `${docId}--section-${sectionIndex + 1}`,
         doc_id: docId,
         record_type: 'section',
-        title,
+        title: section.title,
+        document_title: title,
         section: section.title,
-        breadcrumb: `${category} / ${title}`,
+        breadcrumb: buildBreadcrumb(category, frontMatterKeywords, title, section.title),
         keywords: sectionKeywords,
         content: normalizeContent(section.body),
         url: `${buildUrl(relativePath, attributes)}#${slugifyHeading(section.title, usedSlugs)}`,

@@ -250,7 +250,7 @@
   padding: 0 2px;
 }
 
-.resultBreadcrumb {
+.resultDocumentTitle {
   color: #85878d;
   font-size: 12px;
   line-height: 1.5;
@@ -364,6 +364,10 @@
 :global([data-theme='dark']) .heroInner > p:not(.eyebrow),
 :global([data-theme='dark']) .resultRow p {
   color: #9a9ca2;
+}
+
+:global([data-theme='dark']) .resultDocumentTitle {
+  color: #85878d;
 }
 
 :global([data-theme='dark']) .resultHighlight {

@@ -91,6 +91,7 @@ const config: Config = {
   plugins: [
     './plugins/legacy-url-redirects.mjs',
     './plugins/build-metadata.mjs',
+    './plugins/disable-dev-compression.mjs',
   ],
   themeConfig: {
     image: 'img/qingflow-social-card.svg',

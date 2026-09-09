@@ -9,6 +9,7 @@ export function buildCollectionSchema(collection) {
       {name: 'doc_id', type: 'string', facet: true},
       {name: 'record_type', type: 'string', facet: true},
       {name: 'title', type: 'string'},
+      {name: 'document_title', type: 'string', optional: true},
       {name: 'section', type: 'string', facet: true},
       {name: 'breadcrumb', type: 'string'},
       {name: 'keywords', type: 'string[]', facet: true, optional: true},

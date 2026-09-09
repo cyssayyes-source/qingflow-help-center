@@ -53,9 +53,31 @@
   color: var(--ifm-font-color-base);
 }
 
+.searchHighlight {
+  background: #fff0a8;
+  border-radius: 2px;
+  color: inherit;
+  padding: 0 1px;
+  transition: background-color 600ms ease, color 600ms ease;
+}
+
+.searchHighlightFading {
+  background: transparent;
+}
+
 .tocColumn {
   max-width: 220px;
   padding: 24px 24px 0 8px;
+}
+
+:global([data-theme='dark']) .searchHighlight {
+  background: #66551a;
+  color: #fff3b0;
+}
+
+:global([data-theme='dark']) .searchHighlightFading {
+  background: transparent;
+  color: inherit;
 }
 
 @media (min-width: 997px) {
@@ -97,5 +119,11 @@
     justify-content: center;
     padding: 0;
     width: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .searchHighlight {
+    transition: none;
   }
 }
