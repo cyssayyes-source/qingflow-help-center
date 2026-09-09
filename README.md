@@ -60,7 +60,9 @@ The sync uses `POST /api/collections.list`, reads the Outline document tree and
 Markdown content, and writes disposable output to `docs/generated/` and
 `sidebars.generated.ts`. These generated files are intentionally ignored by
 Git. Images, videos, and attachments are not downloaded; their references are
-kept as absolute Outline URLs.
+kept as absolute Outline URLs. The sync process explicitly disables inherited
+HTTP, HTTPS, and SOCKS proxy environment settings and connects to Outline
+directly.
 
 Existing public routes are bound to Outline document IDs in
 `data/outline-route-map.json`. From an environment that can access Outline, run
@@ -105,9 +107,21 @@ page through `workflow_dispatch`.
 Copy `.env.example` into your runtime environment and provide:
 
 - `TYPESENSE_HOST`
-- `TYPESENSE_SEARCH_API_KEY`
-- `TYPESENSE_ADMIN_API_KEY`
 - `TYPESENSE_COLLECTION`
+- `TYPESENSE_SEARCH_API_KEY` and `TYPESENSE_ADMIN_API_KEY`
+
+The project loads ignored `.env` and `.env.local` files for local commands;
+shell and CI variables take precedence. The admin key is used only by
+`npm run search:push`; the browser receives only the search-only key. Create a
+search key from the admin key with:
+
+```bash
+npm run search:key:create
+```
+
+The command creates a key scoped to `documents:search` for the configured
+collection and prints the generated key once. Store it as
+`TYPESENSE_SEARCH_API_KEY` in your local environment or secret store.
 
 Then you can push search data:
 

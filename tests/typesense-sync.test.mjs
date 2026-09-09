@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {syncTypesense} from '../scripts/lib/typesense-sync.mjs';
+import {
+  createTypesenseSearchKey,
+  syncTypesense,
+} from '../scripts/lib/typesense-sync.mjs';
 
 const host = 'https://typesense.example.com';
 const apiKey = 'admin-key';
@@ -84,4 +87,37 @@ test('Typesense sync never prunes records after a partial import failure', async
   );
   assert.equal(requests.some(({url}) => url.includes('/documents/export')), false);
   assert.equal(requests.some(({options}) => options.method === 'DELETE'), false);
+});
+
+test('Typesense search key is scoped to search actions and the configured collection', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({url, options});
+    return jsonResponse({
+      id: 7,
+      value: 'search-key',
+      description: 'browser search',
+      actions: ['documents:search'],
+      collections: [collection],
+    }, 201);
+  };
+
+  const result = await createTypesenseSearchKey({
+    host,
+    apiKey,
+    collection,
+    description: 'browser search',
+    fetchImpl,
+  });
+
+  assert.equal(result.value, 'search-key');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, `${host}/keys`);
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].options.headers['X-TYPESENSE-API-KEY'], apiKey);
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    description: 'browser search',
+    actions: ['documents:search'],
+    collections: [collection],
+  });
 });

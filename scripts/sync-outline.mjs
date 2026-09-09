@@ -5,6 +5,7 @@ import {
   assignDocumentRoutes,
   createBootstrappedRouteMap,
   createOutlineClient,
+  disableProxyForOutline,
   fetchOutlineSnapshot,
   generateOutlineOutput,
   readLegacyRoutes,
@@ -16,6 +17,8 @@ const cwd = process.cwd();
 const command = process.argv[2] ?? 'sync';
 const routeMapFile = path.join(cwd, 'data', 'outline-route-map.json');
 const conflictReportFile = path.join(cwd, '.tmp', 'outline-route-conflicts.json');
+
+disableProxyForOutline();
 
 async function main() {
   if (!['sync', 'bootstrap-routes'].includes(command)) {

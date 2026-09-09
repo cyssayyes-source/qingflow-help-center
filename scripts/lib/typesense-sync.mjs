@@ -20,7 +20,7 @@ export function buildCollectionSchema(collection) {
       {name: 'language', type: 'string', facet: true},
       {name: 'tags', type: 'string[]', facet: true, optional: true},
       {name: 'updated_at', type: 'string', optional: true},
-      {name: 'updated_at_ts', type: 'int64', optional: true},
+      {name: 'updated_at_ts', type: 'int64'},
     ],
     default_sorting_field: 'updated_at_ts',
   };
@@ -267,4 +267,44 @@ export async function syncTypesense({
   const staleIds = [...new Set(indexedIds)].filter((id) => !currentIds.has(id));
   await deleteTypesenseDocuments({...options, ids: staleIds});
   return {imported: records.length, deleted: staleIds.length};
+}
+
+export async function createTypesenseSearchKey({
+  host,
+  apiKey,
+  collection,
+  description = 'Qingflow Help Center browser search',
+  fetchImpl = fetch,
+}) {
+  const normalizedHost = normalizeHost(host);
+  if (!String(apiKey ?? '').trim()) {
+    throw new Error('TYPESENSE_ADMIN_API_KEY is required to create a search key.');
+  }
+  if (!String(collection ?? '').trim()) {
+    throw new Error('TYPESENSE_COLLECTION must not be empty.');
+  }
+  if (!String(description ?? '').trim()) {
+    throw new Error('TYPESENSE_SEARCH_KEY_DESCRIPTION must not be empty.');
+  }
+
+  const response = await fetchImpl(`${normalizedHost}/keys`, {
+    method: 'POST',
+    headers: requestHeaders(apiKey, 'application/json'),
+    body: JSON.stringify({
+      description: String(description).trim(),
+      actions: ['documents:search'],
+      collections: [String(collection).trim()],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to create Typesense search key: ${response.status}${await responseDetails(response)}`,
+    );
+  }
+
+  const result = await response.json();
+  if (typeof result?.value !== 'string' || !result.value.trim()) {
+    throw new Error('Typesense search key response did not include a key value.');
+  }
+  return result;
 }

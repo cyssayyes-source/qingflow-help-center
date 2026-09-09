@@ -36,6 +36,21 @@ const labelAliases = new Map([
   ['常见问题（faq）', '常见问题-faq'],
   ['faq', '常见问题-faq'],
 ]);
+const proxyEnvironmentVariables = [
+  'ALL_PROXY',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'all_proxy',
+  'http_proxy',
+  'https_proxy',
+];
+
+export function disableProxyForOutline(environment = process.env) {
+  for (const name of proxyEnvironmentVariables) delete environment[name];
+  environment.NODE_USE_ENV_PROXY = '0';
+  environment.NO_PROXY = '*';
+  environment.no_proxy = '*';
+}
 
 function assertObject(value, message) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -197,6 +212,8 @@ export async function fetchOutlineSnapshot(client, collectionName) {
   const navigation = flattenNavigationTree(tree);
   const listedDocuments = await fetchAllPages(client, 'documents.list', {
     collectionId: collection.id,
+    sort: 'createdAt',
+    direction: 'ASC',
   });
   const documentsById = new Map();
   for (const document of listedDocuments) {
@@ -539,6 +556,49 @@ function rewriteSrcSet(value, context) {
     .join(', ');
 }
 
+function escapeInlineJsonObjects(value) {
+  let output = '';
+  let cursor = 0;
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"' && depth > 0) {
+      inString = true;
+      continue;
+    }
+    if (character === '{') {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (character !== '}' || depth === 0) continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+
+    const candidate = value.slice(start, index + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    } catch {
+      continue;
+    }
+    output += value.slice(cursor, start);
+    output += candidate.replaceAll('{', '&#123;').replaceAll('}', '&#125;');
+    cursor = index + 1;
+  }
+  return cursor === 0 ? value : `${output}${value.slice(cursor)}`;
+}
+
 export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
   const normalizedBaseUrl = normalizeOutlineUrl(baseUrl);
   const documentLinks = buildDocumentLinkMap(documents, normalizedBaseUrl);
@@ -553,7 +613,14 @@ export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
       }
       if (inCodeBlock) return line;
 
-      let output = line.replace(
+      let output = line.replace(/<(https?:\/\/[^>\s]+)>/gi, (match, url) =>
+        `[${url}](${rewriteReference(url, {
+          baseUrl: normalizedBaseUrl,
+          documentLinks,
+          media: false,
+        })})`,
+      );
+      output = output.replace(
         /(!?\[[^\]\n]*\]\()<?([^\s)>]+)>?((?:\s+["'][^"']*["'])?\))/g,
         (match, prefix, url, suffix) => {
           const media = prefix.startsWith('!');
@@ -580,9 +647,25 @@ export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
         (match, prefix, value, suffix) =>
           `${prefix}${rewriteSrcSet(value, {baseUrl: normalizedBaseUrl, documentLinks})}${suffix}`,
       );
-      return output
-        .replace(/<(img|source)\b([^>]*?)(?<!\/)\s*>/g, '<$1$2 />')
-        .replace(/\s+style\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
+      const normalizedOutput = output
+        .replace(/<@([A-Za-z0-9_-]+)>/g, '&lt;@$1&gt;')
+        .replace(/<(?=\s*$)/u, '&lt;')
+        .replace(/<(?==)/g, '&lt;')
+        .replace(/<(?=[*_~\s]*(?:\d|\p{Script=Han}))/gu, '&lt;')
+        .replace(
+          /<(br|hr|img|source|track|wbr)\b([^>]*?)(?<!\/)\s*>/gi,
+          '<$1$2 />',
+        )
+        .replace(/\s+style\s*=\s*(?:"[^"]*"|'[^']*')/gi, '')
+        .replace(
+          /\{([\p{Letter}\p{Number}\s_$-]*\p{Script=Han}[\p{Letter}\p{Number}\s_$-]*)\}/gu,
+          '&#123;$1&#125;',
+        )
+        .replace(/\{\{([A-Z][A-Z0-9_]*)\}\}/g, '&#123;&#123;$1&#125;&#125;')
+        .replace(/\{(\d+(?:,\d*)?)\}/g, '&#123;$1&#125;');
+      return /^\s*\|.*\|\s*$/.test(normalizedOutput)
+        ? normalizedOutput.replaceAll('{', '&#123;').replaceAll('}', '&#125;')
+        : escapeInlineJsonObjects(normalizedOutput);
     });
   return lines.join('\n').trim();
 }

@@ -1,6 +1,9 @@
 import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import {loadLocalEnvironment} from './lib/load-env.mjs';
 import {getContentPaths} from './lib/content-source.mjs';
+
+loadLocalEnvironment();
 
 const cwd = process.cwd();
 const {docsBaseRoot, docsRoot} = getContentPaths(cwd);

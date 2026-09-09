@@ -1,24 +1,24 @@
-import {readFile} from 'node:fs/promises';
-import path from 'node:path';
 import {loadLocalEnvironment} from './lib/load-env.mjs';
-import {syncTypesense} from './lib/typesense-sync.mjs';
+import {createTypesenseSearchKey} from './lib/typesense-sync.mjs';
 
 loadLocalEnvironment();
 
 async function main() {
-  const recordsPath = path.join(process.cwd(), '.tmp', 'search-records.json');
-  const records = JSON.parse(await readFile(recordsPath, 'utf8'));
-  await syncTypesense({
+  const result = await createTypesenseSearchKey({
     host: process.env.TYPESENSE_HOST,
     apiKey:
       process.env.TYPESENSE_ADMIN_API_KEY?.trim() ||
       process.env.TYPESENSE_API_KEY?.trim(),
     collection: process.env.TYPESENSE_COLLECTION ?? 'qingflow_help_docs',
-    records,
+    description:
+      process.env.TYPESENSE_SEARCH_KEY_DESCRIPTION ??
+      'Qingflow Help Center browser search',
   });
+
+  console.log(result.value);
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

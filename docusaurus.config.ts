@@ -1,6 +1,14 @@
+import {existsSync} from 'node:fs';
+import path from 'node:path';
+import {loadEnvFile} from 'node:process';
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+
+for (const fileName of ['.env.local', '.env']) {
+  const filePath = path.join(process.cwd(), fileName);
+  if (existsSync(filePath)) loadEnvFile(filePath);
+}
 
 const isGitHubPages = process.env.GITHUB_PAGES === 'true';
 const siteUrl =
@@ -213,7 +221,9 @@ const config: Config = {
       'https://github.com/nonepointer666/qingflow-help-center/tree/main/',
     typesense: {
       host: process.env.TYPESENSE_HOST ?? '',
-      searchApiKey: process.env.TYPESENSE_SEARCH_API_KEY ?? '',
+      searchApiKey:
+        process.env.TYPESENSE_SEARCH_API_KEY?.trim() ||
+        '',
       collection: process.env.TYPESENSE_COLLECTION ?? 'qingflow_help_docs',
     },
   },

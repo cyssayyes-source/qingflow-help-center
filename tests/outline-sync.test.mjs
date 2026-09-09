@@ -16,6 +16,7 @@ import {getContentPaths, getContentSource} from '../scripts/lib/content-source.m
 import {
   assignDocumentRoutes,
   createOutlineClient,
+  disableProxyForOutline,
   fetchAllPages,
   fetchOutlineSnapshot,
   findRelativeMediaReferences,
@@ -37,6 +38,34 @@ function jsonResponse(value, status = 200, headers = {}) {
     headers: {'content-type': 'application/json', ...headers},
   });
 }
+
+test('Outline synchronization disables inherited proxy settings', () => {
+  const environment = {
+    HTTP_PROXY: 'http://127.0.0.1:7890',
+    HTTPS_PROXY: 'http://127.0.0.1:7890',
+    ALL_PROXY: 'socks5://127.0.0.1:7890',
+    http_proxy: 'http://127.0.0.1:7890',
+    https_proxy: 'http://127.0.0.1:7890',
+    all_proxy: 'socks5://127.0.0.1:7890',
+    NODE_USE_ENV_PROXY: '1',
+  };
+
+  disableProxyForOutline(environment);
+
+  for (const name of [
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'all_proxy',
+  ]) {
+    assert.equal(name in environment, false);
+  }
+  assert.equal(environment.NODE_USE_ENV_PROXY, '0');
+  assert.equal(environment.NO_PROXY, '*');
+  assert.equal(environment.no_proxy, '*');
+});
 
 test('content source paths select one document tree', () => {
   assert.equal(getContentSource({}), 'outline');
@@ -134,6 +163,14 @@ test('snapshot uses the collection tree and fetches missing bodies with document
   assert.deepEqual(snapshot.documents[1].parents, ['产品指南']);
   assert.equal(snapshot.documents[1].text, 'Child');
   assert.ok(endpoints.some(({endpoint}) => endpoint === 'documents.info'));
+  assert.ok(
+    endpoints.some(
+      ({endpoint, payload}) =>
+        endpoint === 'documents.list' &&
+        payload.sort === 'createdAt' &&
+        payload.direction === 'ASC',
+    ),
+  );
 });
 
 test('snapshot requires exactly one collection with the configured name', async () => {
@@ -187,6 +224,17 @@ test('media references become absolute and Outline document links become local',
     '![Image](/api/attachments.redirect?id=image)',
     '<video src="/api/attachments.redirect?id=video" poster="/api/attachments.redirect?id=poster"></video>',
     '<source srcset="/api/attachments.redirect?id=small 1x, /api/attachments.redirect?id=large 2x">',
+    'First line<br>Second line',
+    'Visit <https://example.com/help>',
+    '| JSON | {"value":{"enabled":true}} |',
+    '文件{序号}.pdf',
+    'HP < 60，合格率<不合格率，HP **<** 10，行尾<',
+    '正则 ^[a-z]{0,}$ 与 [0-9]{2}',
+    '后行断言 (?<=订单号:)(\\S+)',
+    '例子：{"name":"贾胜强"}',
+    '分页 {{PAGE_INDEX}} 与 {{OFFSET}}',
+    '钉钉语法 <@userid>',
+    '字段 qf_field.{开始日期$$169ACB6B8$$}',
     '```md',
     '![Example](/api/attachments.redirect?id=do-not-rewrite-code)',
     '```',
@@ -197,6 +245,35 @@ test('media references become absolute and Outline document links become local',
   assert.match(rewritten, /https:\/\/outline\.dev\.oalite\.com\/api\/attachments\.redirect\?id=image/);
   assert.match(rewritten, /id=video/);
   assert.match(rewritten, /id=large 2x/);
+  assert.match(rewritten, /First line<br \/>Second line/);
+  assert.match(
+    rewritten,
+    /Visit \[https:\/\/example\.com\/help\]\(https:\/\/example\.com\/help\)/,
+  );
+  assert.match(
+    rewritten,
+    /\| JSON \| &#123;"value":&#123;"enabled":true&#125;&#125; \|/,
+  );
+  assert.match(rewritten, /文件&#123;序号&#125;\.pdf/);
+  assert.match(
+    rewritten,
+    /HP &lt; 60，合格率&lt;不合格率，HP \*\*&lt;\*\* 10，行尾&lt;/,
+  );
+  assert.match(
+    rewritten,
+    /正则 \^\[a-z\]&#123;0,&#125;\$ 与 \[0-9\]&#123;2&#125;/,
+  );
+  assert.match(rewritten, /后行断言 \(\?&lt;=订单号:\)\(\\S\+\)/);
+  assert.match(rewritten, /例子：&#123;"name":"贾胜强"&#125;/);
+  assert.match(
+    rewritten,
+    /分页 &#123;&#123;PAGE_INDEX&#125;&#125; 与 &#123;&#123;OFFSET&#125;&#125;/,
+  );
+  assert.match(rewritten, /钉钉语法 &lt;@userid&gt;/);
+  assert.match(
+    rewritten,
+    /字段 qf_field\.&#123;开始日期\$\$169ACB6B8\$\$&#125;/,
+  );
   assert.match(rewritten, /do-not-rewrite-code/);
   assert.deepEqual(findRelativeMediaReferences(rewritten), []);
 });
