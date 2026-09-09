@@ -542,6 +542,9 @@ function rewriteReference(value, {baseUrl, documentLinks, media}) {
     resolved.origin === new URL(baseUrl).origin &&
     /^\/api\/(?:attachments|files)(?:\.|\/)/i.test(resolved.pathname);
   if (media || isOutlineAttachment) return resolved.toString();
+  // Docusaurus treats protocol-relative links as local routes. Outline content
+  // can contain these links, so make their external protocol explicit.
+  if (String(value).startsWith('//')) return resolved.toString();
   return value;
 }
 
@@ -554,6 +557,41 @@ function rewriteSrcSet(value, context) {
       return `${rewriteReference(match[1], {...context, media: true})}${match[2] ?? ''}`;
     })
     .join(', ');
+}
+
+function isMalformedWebUrl(value) {
+  if (!/^https?:\/\//i.test(value)) return false;
+  try {
+    return !new URL(value).hostname;
+  } catch {
+    return true;
+  }
+}
+
+function isInvalidMarkdownLinkTarget(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  // Outline's rich-text conversion can turn an email domain into a local path
+  // such as `/example.com`. It cannot resolve inside this site, so retain the
+  // label instead of emitting a broken Docusaurus route.
+  const malformedLocalDomain = /^\/(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|$)/i.test(normalized);
+  return (
+    !normalized ||
+    normalized === 'undefined' ||
+    normalized === 'null' ||
+    malformedLocalDomain ||
+    isMalformedWebUrl(normalized)
+  );
+}
+
+function removeInvalidMarkdownLinks(value) {
+  return value.replace(
+    /(!?)\[([^\]\n]*)\]\(\s*(?:<([^>\s]*)>|([^\s)]+))?\s*(?:["'][^"']*["'])?\s*\)/g,
+    (match, imageMarker, label, bracketedUrl, bareUrl) => {
+      const url = bracketedUrl ?? bareUrl ?? '';
+      if (!isInvalidMarkdownLinkTarget(url)) return match;
+      return label;
+    },
+  );
 }
 
 function escapeInlineJsonObjects(value) {
@@ -599,19 +637,67 @@ function escapeInlineJsonObjects(value) {
   return cursor === 0 ? value : `${output}${value.slice(cursor)}`;
 }
 
+function escapeMdxTextBraces(value) {
+  let output = '';
+  let cursor = 0;
+  const delimiterPattern = /`+/g;
+  let opening;
+
+  while ((opening = delimiterPattern.exec(value))) {
+    const delimiter = opening[0];
+    const closingIndex = value.indexOf(delimiter, opening.index + delimiter.length);
+    if (closingIndex === -1) break;
+    output += value
+      .slice(cursor, opening.index)
+      .replaceAll('{', '&#123;')
+      .replaceAll('}', '&#125;');
+    const closingEnd = closingIndex + delimiter.length;
+    output += value.slice(opening.index, closingEnd);
+    cursor = closingEnd;
+    delimiterPattern.lastIndex = closingEnd;
+  }
+
+  return `${output}${value
+    .slice(cursor)
+    .replaceAll('{', '&#123;')
+    .replaceAll('}', '&#125;')}`;
+}
+
+function escapeHtmlInQuotedValues(value) {
+  const marker = value.match(/:\s*["']/);
+  if (!marker) return value;
+  const start = marker.index + marker[0].length;
+  if (!/[<][/?A-Za-z]/.test(value.slice(start))) return value;
+  return `${value.slice(0, start)}${value
+    .slice(start)
+    .replace(/<\/?[A-Za-z][^>]*>/g, (tag) =>
+      tag.replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
+    )}`;
+}
+
 export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
   const normalizedBaseUrl = normalizeOutlineUrl(baseUrl);
   const documentLinks = buildDocumentLinkMap(documents, normalizedBaseUrl);
-  let inCodeBlock = false;
+  let codeFence;
   const lines = String(markdown)
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inCodeBlock = !inCodeBlock;
+      const unquotedLine = line.replace(/^(?: {0,3}> ?)+/, '');
+      const fenceMatch = unquotedLine.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (
+        fenceMatch &&
+        (!codeFence ||
+          (fenceMatch[1][0] === codeFence.marker &&
+            fenceMatch[1].length >= codeFence.length &&
+            /^\s*$/.test(fenceMatch[2])))
+      ) {
+        codeFence = codeFence
+          ? undefined
+          : {marker: fenceMatch[1][0], length: fenceMatch[1].length};
         return line;
       }
-      if (inCodeBlock) return line;
+      if (codeFence) return line;
 
       let output = line.replace(/<(https?:\/\/[^>\s]+)>/gi, (match, url) =>
         `[${url}](${rewriteReference(url, {
@@ -647,8 +733,11 @@ export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
         (match, prefix, value, suffix) =>
           `${prefix}${rewriteSrcSet(value, {baseUrl: normalizedBaseUrl, documentLinks})}${suffix}`,
       );
+      output = removeInvalidMarkdownLinks(output);
       const normalizedOutput = output
         .replace(/<@([A-Za-z0-9_-]+)>/g, '&lt;@$1&gt;')
+        .replace(/<(?=\/?[A-Z][A-Za-z0-9_-]*(?:\s|\/?>))/g, '&lt;')
+        .replace(/<(?=[^\sA-Za-z!/?])/gu, '&lt;')
         .replace(/<(?=\s*$)/u, '&lt;')
         .replace(/<(?==)/g, '&lt;')
         .replace(/<(?=[*_~\s]*(?:\d|\p{Script=Han}))/gu, '&lt;')
@@ -658,14 +747,22 @@ export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
         )
         .replace(/\s+style\s*=\s*(?:"[^"]*"|'[^']*')/gi, '')
         .replace(
+          /\{\{([\p{Letter}\p{Number}\s_$-]+)\}\}/gu,
+          '&#123;&#123;$1&#125;&#125;',
+        )
+        .replace(
           /\{([\p{Letter}\p{Number}\s_$-]*\p{Script=Han}[\p{Letter}\p{Number}\s_$-]*)\}/gu,
           '&#123;$1&#125;',
         )
-        .replace(/\{\{([A-Z][A-Z0-9_]*)\}\}/g, '&#123;&#123;$1&#125;&#125;')
+        .replace(
+          /(qf_output\s*=\s*)\{([A-Za-z_$][A-Za-z0-9_$]*)\}/gi,
+          '$1&#123;$2&#125;',
+        )
         .replace(/\{(\d+(?:,\d*)?)\}/g, '&#123;$1&#125;');
-      return /^\s*\|.*\|\s*$/.test(normalizedOutput)
+      const safeOutput = /^\s*\|.*\|\s*$/.test(normalizedOutput)
         ? normalizedOutput.replaceAll('{', '&#123;').replaceAll('}', '&#125;')
         : escapeInlineJsonObjects(normalizedOutput);
+      return escapeMdxTextBraces(escapeHtmlInQuotedValues(safeOutput));
     });
   return lines.join('\n').trim();
 }
@@ -697,6 +794,23 @@ function plainText(markdown) {
     .trim();
 }
 
+function replaceUnpairedSurrogates(value) {
+  return String(value).replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '\uFFFD',
+  );
+}
+
+function createDescription(markdown, maximumLength = 180) {
+  const description = Array.from(replaceUnpairedSurrogates(plainText(markdown)))
+    .slice(0, maximumLength)
+    .join('')
+    .trimEnd();
+  // A Markdown escape at the truncation boundary would escape the quote in
+  // Docusaurus' generated front matter module.
+  return description.replace(/\\+$/, '');
+}
+
 function validateUrlProtocol(value, context) {
   const normalized = String(value ?? '').trim().replace(/[\u0000-\u0020]+/g, '');
   if (/^(?:javascript|vbscript):/i.test(normalized)) {
@@ -711,7 +825,10 @@ function outlineMarkdownSafetyPlugin() {
   return (tree) => {
     function walk(node) {
       if (['mdxjsEsm', 'mdxFlowExpression', 'mdxTextExpression'].includes(node.type)) {
-        throw new Error(`Executable MDX construct is not allowed: ${node.type}`);
+        const location = node.position?.start?.line
+          ? ` at line ${node.position.start.line}`
+          : '';
+        throw new Error(`Executable MDX construct is not allowed: ${node.type}${location}`);
       }
       if (['link', 'image', 'definition'].includes(node.type)) {
         validateUrlProtocol(node.url, node.type);
@@ -760,7 +877,7 @@ export function serializeGeneratedDocument(document, markdown, baseUrl) {
   return [
     '---',
     `title: ${JSON.stringify(document.title)}`,
-    `description: ${JSON.stringify(plainText(markdown).slice(0, 180))}`,
+    `description: ${JSON.stringify(createDescription(markdown))}`,
     `slug: ${JSON.stringify(document.slug)}`,
     'source: "outline"',
     `source_url: ${JSON.stringify(sourceUrl)}`,

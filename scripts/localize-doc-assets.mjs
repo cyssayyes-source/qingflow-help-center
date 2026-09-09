@@ -466,9 +466,10 @@ async function recoverAssets(mappingFile) {
 async function checkAssets() {
   const {files, references} = await collectExternalImages();
   const missing = [];
-  const knownBroken = [...references.keys()].filter(
-    (url) => new URL(url).hostname === 'hc.qingflow.com',
-  );
+  const knownBroken =
+    contentSource === 'legacy'
+      ? [...references.keys()].filter((url) => new URL(url).hostname === 'hc.qingflow.com')
+      : [];
   let localReferences = 0;
 
   for (const filePath of files) {

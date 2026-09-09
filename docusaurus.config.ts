@@ -70,6 +70,10 @@ const config: Config = {
             ? './sidebars.ts'
             : './sidebars.generated.ts',
           exclude: useLegacyContent ? ['generated/**'] : ['migrated/**'],
+          // Outline document IDs are UUID filenames. A numeric UUID prefix must
+          // remain part of its Docusaurus document ID rather than be treated as
+          // a sidebar ordering prefix.
+          numberPrefixParser: useLegacyContent,
           editUrl: useLegacyContent
             ? process.env.GITHUB_EDIT_URL ??
               'https://github.com/nonepointer666/qingflow-help-center/tree/main/'

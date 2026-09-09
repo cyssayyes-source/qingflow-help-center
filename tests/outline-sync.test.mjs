@@ -24,6 +24,7 @@ import {
   readLegacyRoutes,
   replaceGeneratedOutput,
   rewriteMarkdownUrls,
+  serializeGeneratedDocument,
   serializeGeneratedSidebar,
   validateOutlineMarkdown,
 } from '../scripts/lib/outline-sync.mjs';
@@ -210,7 +211,7 @@ test('snapshot rejects wrong bodies and documents outside the navigation tree', 
   await assert.rejects(fetchOutlineSnapshot(extraBodyClient, '售后知识库'), /outside the navigation tree/);
 });
 
-test('media references become absolute and Outline document links become local', () => {
+test('media references become absolute and Outline document links become local', async () => {
   const documents = [
     {
       id: 'doc-1',
@@ -232,12 +233,22 @@ test('media references become absolute and Outline document links become local',
     '正则 ^[a-z]{0,}$ 与 [0-9]{2}',
     '后行断言 (?<=订单号:)(\\S+)',
     '例子：{"name":"贾胜强"}',
-    '分页 {{PAGE_INDEX}} 与 {{OFFSET}}',
+    '分页 {{PAGE_INDEX}}、{{accessToken}} 与 {{变量名称}}',
     '钉钉语法 <@userid>',
     '字段 qf_field.{开始日期$$169ACB6B8$$}',
+    '输出 qf_output={key}',
+    'API /{appKey}，表达式 {process.env.OUTLINE_API_TOKEN}，代码 `{kept}`',
+    '文本 <CB>标题</CB> 与 <’ 符号',
+    'JSON 示例：{"value":"<p><strong>文本</strong><p>"}',
+    '[无效链接](https://) 与 [空链接]()、![空图片]()、[未知目标](undefined) 和 [错误域名](/exiao.tech)',
+    '[协议相对链接](//exiao.tech/help)',
     '```md',
     '![Example](/api/attachments.redirect?id=do-not-rewrite-code)',
     '```',
+    '> ```json',
+    '> {"quoted":"{kept}"}',
+    '> <CB> 与 <’ 保持代码原样',
+    '> ```',
   ].join('\n');
 
   const rewritten = rewriteMarkdownUrls(markdown, documents, baseUrl);
@@ -267,15 +278,51 @@ test('media references become absolute and Outline document links become local',
   assert.match(rewritten, /例子：&#123;"name":"贾胜强"&#125;/);
   assert.match(
     rewritten,
-    /分页 &#123;&#123;PAGE_INDEX&#125;&#125; 与 &#123;&#123;OFFSET&#125;&#125;/,
+    /分页 &#123;&#123;PAGE_INDEX&#125;&#125;、&#123;&#123;accessToken&#125;&#125; 与 &#123;&#123;变量名称&#125;&#125;/,
   );
   assert.match(rewritten, /钉钉语法 &lt;@userid&gt;/);
   assert.match(
     rewritten,
     /字段 qf_field\.&#123;开始日期\$\$169ACB6B8\$\$&#125;/,
   );
+  assert.match(rewritten, /输出 qf_output=&#123;key&#125;/);
+  assert.match(
+    rewritten,
+    /API \/&#123;appKey&#125;，表达式 &#123;process\.env\.OUTLINE_API_TOKEN&#125;，代码 `\{kept\}`/,
+  );
+  assert.match(rewritten, /文本 &lt;CB>标题&lt;\/CB> 与 &lt;’ 符号/);
+  assert.match(rewritten, /JSON 示例：&#123;"value":"&lt;p&gt;&lt;strong&gt;文本&lt;\/strong&gt;&lt;p&gt;"&#125;/);
+  assert.match(rewritten, /无效链接 与 空链接、空图片、未知目标 和 错误域名/);
+  assert.match(rewritten, /\[协议相对链接\]\(https:\/\/exiao\.tech\/help\)/);
+  assert.match(rewritten, /> \{"quoted":"\{kept\}"\}/);
+  assert.match(rewritten, /> <CB> 与 <’ 保持代码原样/);
+  await assert.doesNotReject(() => validateOutlineMarkdown(rewritten));
   assert.match(rewritten, /do-not-rewrite-code/);
   assert.deepEqual(findRelativeMediaReferences(rewritten), []);
+});
+
+test('generated descriptions preserve Unicode and do not end in a Markdown escape', () => {
+  const document = {
+    id: docIdOne,
+    urlId: 'one',
+    title: 'Guide',
+    parents: [],
+    slug: '/outline/one',
+  };
+  const emojiAtBoundary = serializeGeneratedDocument(
+    document,
+    `${'a'.repeat(179)}😀`,
+    baseUrl,
+  );
+  const trailingEscape = serializeGeneratedDocument(
+    document,
+    `${'a'.repeat(179)}\\.`,
+    baseUrl,
+  );
+
+  assert.match(emojiAtBoundary, /😀/);
+  assert.doesNotMatch(emojiAtBoundary, /\\ud83d/i);
+  assert.match(trailingEscape, /description: "a{179}"/);
 });
 
 test('Outline Markdown rejects executable MDX and unsafe JSX', async () => {
@@ -369,7 +416,7 @@ test('failed MDX validation leaves the previous generated output intact', async 
     id: docIdOne,
     urlId: 'broken',
     title: 'Broken',
-    text: '{broken',
+    text: 'export const broken = true',
     parents: [],
     slug: '/outline/broken',
     routeSource: 'outline-id',

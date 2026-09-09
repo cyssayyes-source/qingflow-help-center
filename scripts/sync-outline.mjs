@@ -1,4 +1,5 @@
 import path from 'node:path';
+import {loadLocalEnvironment} from './lib/load-env.mjs';
 import {
   DEFAULT_OUTLINE_COLLECTION,
   DEFAULT_OUTLINE_URL,
@@ -18,6 +19,7 @@ const command = process.argv[2] ?? 'sync';
 const routeMapFile = path.join(cwd, 'data', 'outline-route-map.json');
 const conflictReportFile = path.join(cwd, '.tmp', 'outline-route-conflicts.json');
 
+loadLocalEnvironment(cwd);
 disableProxyForOutline();
 
 async function main() {
