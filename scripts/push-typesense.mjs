@@ -8,6 +8,9 @@ loadLocalEnvironment();
 async function main() {
   const recordsPath = path.join(process.cwd(), '.tmp', 'search-records.json');
   const records = JSON.parse(await readFile(recordsPath, 'utf8'));
+  const synonymGroups = JSON.parse(
+    await readFile(path.join(process.cwd(), 'data', 'search-synonyms.json'), 'utf8'),
+  );
   await syncTypesense({
     host: process.env.TYPESENSE_HOST,
     apiKey:
@@ -15,6 +18,7 @@ async function main() {
       process.env.TYPESENSE_API_KEY?.trim(),
     collection: process.env.TYPESENSE_COLLECTION ?? 'qingflow_help_docs',
     records,
+    synonymGroups,
   });
 }
 

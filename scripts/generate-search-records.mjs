@@ -2,6 +2,7 @@ import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {loadLocalEnvironment} from './lib/load-env.mjs';
 import {getContentPaths} from './lib/content-source.mjs';
+import {buildSearchTokens} from './lib/search-tokenizer.mjs';
 
 loadLocalEnvironment();
 
@@ -392,6 +393,13 @@ async function main() {
       section: category,
       breadcrumb: buildBreadcrumb(category, frontMatterKeywords, title),
       keywords,
+      search_tokens: buildSearchTokens([
+        title,
+        category,
+        ...tags,
+        ...frontMatterKeywords,
+        content,
+      ]),
       content,
       url: buildUrl(relativePath, attributes),
       product: 'qingflow',
@@ -422,6 +430,7 @@ async function main() {
         section: section.title,
         breadcrumb: buildBreadcrumb(category, frontMatterKeywords, title, section.title),
         keywords: sectionKeywords,
+        search_tokens: buildSearchTokens([section.title, section.body, title, category, ...tags]),
         content: normalizeContent(section.body),
         url: `${buildUrl(relativePath, attributes)}#${slugifyHeading(section.title, usedSlugs)}`,
         product: 'qingflow',

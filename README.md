@@ -129,6 +129,13 @@ Then you can push search data:
 npm run search:push
 ```
 
+`search:push` uploads the same `.tmp/search-records.json` snapshot used by the
+site, reconciles the native Typesense v30 synonym set
+`<collection>-synonyms`, and links that set to the collection. Searchable text
+fields use the `zh` locale tokenizer, while `search_tokens` keeps overlapping
+Chinese n-grams available for mixed Chinese/English queries. Re-run
+`npm run build:index` before pushing whenever the content snapshot changes.
+
 ## Key directories
 
 ```text
@@ -142,7 +149,6 @@ typesense/schema/      Collection schema reference
 ## Next suggested milestones
 
 1. Connect a real Typesense instance and search-only API key
-2. Add synonym rules and ranking strategy
-3. Add scheduled Outline synchronization and content freshness monitoring
-4. Add OpenAPI-driven API reference pages
-5. Add AI answer generation with source citations
+2. Add scheduled Outline synchronization and content freshness monitoring
+3. Add OpenAPI-driven API reference pages
+4. Add AI answer generation with source citations

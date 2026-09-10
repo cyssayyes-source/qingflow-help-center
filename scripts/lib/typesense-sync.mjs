@@ -1,29 +1,39 @@
+import {createHash} from 'node:crypto';
+
 const safeDocumentIdPattern = /^[A-Za-z0-9_-]+$/;
 const deleteBatchSize = 100;
 
-export function buildCollectionSchema(collection) {
+export function getTypesenseSynonymSetName(collection) {
+  const value = String(collection ?? '').trim();
+  if (!value) throw new Error('TYPESENSE_COLLECTION must not be empty.');
+  return `${value}-synonyms`;
+}
+
+export function buildCollectionSchema(collection, {synonymSetName} = {}) {
   return {
     name: collection,
     enable_nested_fields: false,
     fields: [
       {name: 'doc_id', type: 'string', facet: true},
       {name: 'record_type', type: 'string', facet: true},
-      {name: 'title', type: 'string'},
-      {name: 'document_title', type: 'string', optional: true},
-      {name: 'section', type: 'string', facet: true},
-      {name: 'breadcrumb', type: 'string'},
-      {name: 'keywords', type: 'string[]', facet: true, optional: true},
-      {name: 'content', type: 'string'},
+      {name: 'title', type: 'string', locale: 'zh'},
+      {name: 'document_title', type: 'string', optional: true, locale: 'zh'},
+      {name: 'section', type: 'string', facet: true, locale: 'zh'},
+      {name: 'breadcrumb', type: 'string', locale: 'zh'},
+      {name: 'keywords', type: 'string[]', facet: true, optional: true, locale: 'zh'},
+      {name: 'search_tokens', type: 'string[]', optional: true, locale: 'zh'},
+      {name: 'content', type: 'string', locale: 'zh'},
       {name: 'url', type: 'string', facet: true},
       {name: 'product', type: 'string', facet: true},
       {name: 'business_priority', type: 'int32', optional: true},
       {name: 'version', type: 'string', facet: true},
       {name: 'language', type: 'string', facet: true},
-      {name: 'tags', type: 'string[]', facet: true, optional: true},
+      {name: 'tags', type: 'string[]', facet: true, optional: true, locale: 'zh'},
       {name: 'updated_at', type: 'string', optional: true},
       {name: 'updated_at_ts', type: 'int64'},
     ],
     default_sorting_field: 'updated_at_ts',
+    ...(synonymSetName ? {synonym_sets: [synonymSetName]} : {}),
   };
 }
 
@@ -51,6 +61,30 @@ function requestHeaders(apiKey, contentType) {
     ...(contentType ? {'Content-Type': contentType} : {}),
     'X-TYPESENSE-API-KEY': apiKey,
   };
+}
+
+function synonymSetUrl(host, name) {
+  return `${host}/synonym_sets/${encodeURIComponent(name)}`;
+}
+
+function normalizeSynonymTerms(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((term) => String(term ?? '').trim()).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'));
+}
+
+export function buildTypesenseSynonyms(groups) {
+  if (!Array.isArray(groups)) return [];
+  const seen = new Set();
+  return groups.flatMap((group) => {
+    const synonyms = normalizeSynonymTerms(group?.terms ?? group?.synonyms);
+    if (synonyms.length < 2) return [];
+    const key = synonyms.map((term) => term.toLowerCase()).join('\u0000');
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const digest = createHash('sha256').update(key).digest('hex').slice(0, 16);
+    return [{id: `qingflow-${digest}`, synonyms}];
+  });
 }
 
 async function responseDetails(response) {
@@ -103,23 +137,28 @@ export async function ensureTypesenseCollection({
 
   if (response.ok) {
     const existingSchema = await response.json();
-    const existingFields = new Set(
-      (existingSchema.fields ?? []).map((field) => field.name),
+    const existingFields = new Map(
+      (existingSchema.fields ?? []).map((field) => [field.name, field]),
     );
     const missingFields = schema.fields.filter((field) => !existingFields.has(field.name));
-    if (missingFields.length === 0) return;
+    const localeChanges = schema.fields
+      .filter((field) => existingFields.has(field.name) && field.locale)
+      .filter((field) => existingFields.get(field.name)?.locale !== field.locale)
+      .flatMap((field) => [{name: field.name, drop: true}, field]);
+    const fields = [...missingFields, ...localeChanges];
+    if (fields.length === 0) return;
 
     const alterResponse = await fetchImpl(collectionUrl(host, collection), {
       method: 'PATCH',
       headers: requestHeaders(apiKey, 'application/json'),
-      body: JSON.stringify({fields: missingFields}),
+      body: JSON.stringify({fields}),
     });
     if (!alterResponse.ok) {
       throw new Error(
         `Failed to update collection schema: ${alterResponse.status}${await responseDetails(alterResponse)}`,
       );
     }
-    logger.log(`Added ${missingFields.length} fields to ${collection}`);
+    logger.log(`Updated ${fields.length} Typesense schema fields in ${collection}`);
     return;
   }
 
@@ -139,6 +178,71 @@ export async function ensureTypesenseCollection({
       `Failed to create collection: ${createResponse.status}${await responseDetails(createResponse)}`,
     );
   }
+}
+
+export async function ensureTypesenseSynonyms({
+  host,
+  apiKey,
+  collection,
+  synonymGroups,
+  fetchImpl = fetch,
+  logger = console,
+}) {
+  const synonymSetName = getTypesenseSynonymSetName(collection);
+  const desired = buildTypesenseSynonyms(synonymGroups);
+  const listResponse = await fetchImpl(synonymSetUrl(host, synonymSetName), {
+    headers: requestHeaders(apiKey),
+  });
+  if (!listResponse.ok && listResponse.status !== 404) {
+    throw new Error(
+      `Failed to retrieve Typesense synonym set: ${listResponse.status}${await responseDetails(listResponse)}`,
+    );
+  }
+
+  const existingSet = listResponse.status === 404 ? undefined : await listResponse.json();
+  const existing = Array.isArray(existingSet?.items)
+    ? existingSet.items.filter((item) => typeof item?.id === 'string')
+    : [];
+  const normalizeItems = (items) => items
+    .map((item) => ({id: String(item.id), synonyms: normalizeSynonymTerms(item.synonyms)}))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const changed = JSON.stringify(normalizeItems(existing)) !== JSON.stringify(normalizeItems(desired));
+
+  if (changed || listResponse.status === 404) {
+    const response = await fetchImpl(synonymSetUrl(host, synonymSetName), {
+      method: 'PUT',
+      headers: requestHeaders(apiKey, 'application/json'),
+      body: JSON.stringify({items: desired}),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Failed to upsert Typesense synonym set: ${response.status}${await responseDetails(response)}`,
+      );
+    }
+  }
+
+  const collectionResponse = await fetchImpl(collectionUrl(host, collection), {
+    method: 'PATCH',
+    headers: requestHeaders(apiKey, 'application/json'),
+    body: JSON.stringify({synonym_sets: [synonymSetName]}),
+  });
+  if (!collectionResponse.ok) {
+    throw new Error(
+      `Failed to link Typesense synonym set: ${collectionResponse.status}${await responseDetails(collectionResponse)}`,
+    );
+  }
+
+  const deleted = existing.filter(
+    (item) => !desired.some((candidate) => candidate.id === item.id),
+  ).length;
+  const changedCount = changed || listResponse.status === 404 ? 1 : 0;
+  if (changedCount > 0) logger.log(`Synchronized ${desired.length} Typesense synonyms in ${collection}`);
+  return {
+    setName: synonymSetName,
+    synchronized: desired.length,
+    changed: changedCount,
+    deleted,
+  };
 }
 
 export async function importTypesenseDocuments({
@@ -245,6 +349,7 @@ export async function syncTypesense({
   apiKey,
   collection = 'qingflow_help_docs',
   records,
+  synonymGroups,
   fetchImpl = fetch,
   logger = console,
 }) {
@@ -263,6 +368,9 @@ export async function syncTypesense({
     logger,
   };
   await ensureTypesenseCollection(options);
+  if (synonymGroups !== undefined) {
+    await ensureTypesenseSynonyms({...options, synonymGroups});
+  }
   await importTypesenseDocuments({...options, records});
   const indexedIds = await exportTypesenseDocumentIds(options);
   const staleIds = [...new Set(indexedIds)].filter((id) => !currentIds.has(id));

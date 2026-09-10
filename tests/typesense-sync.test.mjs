@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createTypesenseSearchKey,
+  buildTypesenseSynonyms,
+  ensureTypesenseSynonyms,
+  getTypesenseSynonymSetName,
   syncTypesense,
 } from '../scripts/lib/typesense-sync.mjs';
 
@@ -120,4 +123,44 @@ test('Typesense search key is scoped to search actions and the configured collec
     actions: ['documents:search'],
     collections: [collection],
   });
+});
+
+test('Typesense synonyms are reconciled through the native collection API', async () => {
+  const requests = [];
+  const groups = [{terms: ['数据导入', '批量导入']}, {terms: ['旧词', '旧别名']}];
+  const desired = buildTypesenseSynonyms(groups);
+  const staleId = 'stale-rule';
+  const setName = getTypesenseSynonymSetName(collection);
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({url, options});
+    if (url === `${host}/synonym_sets/${setName}` && !options.method) {
+      return jsonResponse({name: setName, items: [
+        {id: desired[0].id, synonyms: ['导入数据', '数据导入']},
+        {id: staleId, synonyms: ['旧词', '旧别名']},
+      ]});
+    }
+    if (url === `${host}/synonym_sets/${setName}` && options.method === 'PUT') {
+      return jsonResponse({name: setName}, 200);
+    }
+    if (url === `${host}/collections/${collection}` && options.method === 'PATCH') {
+      return jsonResponse({}, 200);
+    }
+    throw new Error(`Unexpected request: ${options.method ?? 'GET'} ${url}`);
+  };
+
+  const result = await ensureTypesenseSynonyms({
+    host,
+    apiKey,
+    collection,
+    synonymGroups: groups,
+    fetchImpl,
+    logger: {log() {}},
+  });
+
+  assert.deepEqual(result, {setName, synchronized: 2, changed: 1, deleted: 1});
+  assert.equal(requests[0].options.headers['X-TYPESENSE-API-KEY'], apiKey);
+  assert.equal(JSON.parse(requests[1].options.body).items.length, 2);
+  assert.equal(requests[1].options.method, 'PUT');
+  assert.equal(requests[2].options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(requests[2].options.body), {synonym_sets: [setName]});
 });

@@ -42,6 +42,7 @@ type SearchDocument = {
   product?: string;
   business_priority?: number;
   tags?: string[];
+  search_tokens?: string[];
 };
 
 type SearchMatch = {start: number; end: number};
@@ -210,6 +211,7 @@ function searchLocalDocuments(
     ['section', 80],
     ['keywords', 70],
     ['tags', 50],
+    ['search_tokens', 65],
     ['content', 10],
   ];
   const matchesByDocument = new Map<
@@ -433,13 +435,14 @@ function createTypesenseSearch(
   return {
     collection,
     q: query,
-    query_by: 'title,keywords,tags,content',
-    query_by_weights: '12,8,5,2',
+    query_by: 'title,section,keywords,tags,search_tokens,content',
+    query_by_weights: '12,8,7,5,6,2',
+    synonym_sets: `${collection}-synonyms`,
     highlight_fields: 'title,keywords,content',
     prioritize_exact_match: true,
     prioritize_token_position: true,
     text_match_type: 'max_score',
-    prefix: 'true,true,true,true',
+    prefix: 'true,true,true,true,false,true',
     num_typos: 1,
     page: options.page ?? 1,
     per_page: options.perPage ?? GROUP_HIT_LIMIT,

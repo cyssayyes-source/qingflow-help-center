@@ -4,20 +4,22 @@
   "fields": [
     {"name": "doc_id", "type": "string", "facet": true},
     {"name": "record_type", "type": "string", "facet": true},
-    {"name": "title", "type": "string"},
-    {"name": "document_title", "type": "string", "optional": true},
-    {"name": "section", "type": "string", "facet": true},
-    {"name": "breadcrumb", "type": "string"},
-    {"name": "keywords", "type": "string[]", "facet": true, "optional": true},
-    {"name": "content", "type": "string"},
+    {"name": "title", "type": "string", "locale": "zh"},
+    {"name": "document_title", "type": "string", "optional": true, "locale": "zh"},
+    {"name": "section", "type": "string", "facet": true, "locale": "zh"},
+    {"name": "breadcrumb", "type": "string", "locale": "zh"},
+    {"name": "keywords", "type": "string[]", "facet": true, "optional": true, "locale": "zh"},
+    {"name": "search_tokens", "type": "string[]", "optional": true, "locale": "zh"},
+    {"name": "content", "type": "string", "locale": "zh"},
     {"name": "url", "type": "string", "facet": true},
     {"name": "product", "type": "string", "facet": true},
     {"name": "business_priority", "type": "int32", "optional": true},
     {"name": "version", "type": "string", "facet": true},
     {"name": "language", "type": "string", "facet": true},
-    {"name": "tags", "type": "string[]", "facet": true, "optional": true},
+    {"name": "tags", "type": "string[]", "facet": true, "optional": true, "locale": "zh"},
     {"name": "updated_at", "type": "string", "optional": true},
     {"name": "updated_at_ts", "type": "int64"}
   ],
-  "default_sorting_field": "updated_at_ts"
+  "default_sorting_field": "updated_at_ts",
+  "synonym_sets": ["qingflow_help_docs-synonyms"]
 }
