@@ -263,7 +263,88 @@ export async function fetchOutlineSnapshot(client, collectionName) {
     };
   });
 
-  return {collection, tree, documents};
+  const attachments = await fetchOutlineAttachmentMetadata(client, documents, client.baseUrl);
+  return {collection, tree, documents, attachments};
+}
+
+function attachmentIdFromUrl(value, baseUrl) {
+  if (!value || isSkippedUrl(value)) return '';
+  let parsed;
+  try {
+    parsed = new URL(value, `${baseUrl}/`);
+  } catch {
+    return '';
+  }
+  if (
+    parsed.origin !== new URL(baseUrl).origin ||
+    parsed.pathname.toLowerCase() !== '/api/attachments.redirect'
+  ) {
+    return '';
+  }
+  return String(parsed.searchParams.get('id') ?? '').trim();
+}
+
+export function collectOutlineAttachmentIds(markdown, baseUrl) {
+  const normalizedBaseUrl = normalizeOutlineUrl(baseUrl);
+  const ids = new Set();
+  const source = String(markdown).replace(/(?:```|~~~)[\s\S]*?(?:```|~~~)/g, '');
+  for (const match of source.matchAll(
+    /(!?)\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?/g,
+  )) {
+    if (match[1]) continue;
+    const id = attachmentIdFromUrl(
+      match[2].replace(/[.,;:]+$/, ''),
+      normalizedBaseUrl,
+    );
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
+export async function fetchOutlineAttachmentMetadata(client, documents, baseUrl) {
+  const normalizedBaseUrl = normalizeOutlineUrl(baseUrl);
+  const candidates = documents
+    .map((document) => ({
+      documentId: document.id,
+      ids: collectOutlineAttachmentIds(document.text, normalizedBaseUrl),
+    }))
+    .filter(({ids}) => ids.length > 0);
+  if (candidates.length === 0) return new Map();
+
+  const metadata = new Map();
+  const entries = await mapConcurrent(candidates, async ({documentId, ids}) => {
+    const requestedIds = new Set(ids);
+    const attachments = await fetchAllPages(
+      client,
+      'attachments.list',
+      {documentId},
+    );
+    const matches = [];
+    for (const attachment of attachments) {
+      assertObject(
+        attachment,
+        `Outline attachments.list returned invalid metadata for document ${documentId}.`,
+      );
+      const id = String(attachment.id ?? '').trim();
+      if (!id || !requestedIds.has(id)) continue;
+      const ownerId = String(attachment.documentId ?? '').trim();
+      if (ownerId && ownerId !== documentId) {
+        throw new Error(`Outline attachment ${id} belongs to an unexpected document.`);
+      }
+      const contentType = String(
+        attachment.contentType ?? attachment.mimeType ?? attachment.type ?? '',
+      )
+        .trim()
+        .toLowerCase();
+      matches.push([id, {id, contentType}]);
+    }
+    return matches;
+  });
+  for (const [id, attachment] of entries.flat()) {
+    if (metadata.has(id)) throw new Error(`Duplicate Outline attachment metadata: ${id}`);
+    metadata.set(id, attachment);
+  }
+  return metadata;
 }
 
 function parseYamlValue(rawValue) {
@@ -559,6 +640,42 @@ function rewriteSrcSet(value, context) {
     .join(', ');
 }
 
+function attachmentMetadataFor(metadata, id) {
+  if (!metadata || !id) return undefined;
+  if (metadata instanceof Map) return metadata.get(id);
+  return metadata[id];
+}
+
+function escapeHtmlText(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function rewriteVideoAttachmentLinks(value, {baseUrl, attachmentMetadata}) {
+  if (!attachmentMetadata || (attachmentMetadata instanceof Map && attachmentMetadata.size === 0)) {
+    return value;
+  }
+  return value.replace(
+    /(!?)\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?((?:\s+["'][^"']*["'])?\s*\))/g,
+    (match, imageMarker, label, target) => {
+      if (imageMarker) return match;
+      const absoluteUrl = absoluteOutlineUrl(target, baseUrl);
+      const id = attachmentIdFromUrl(absoluteUrl, baseUrl);
+      const contentType = String(
+        attachmentMetadataFor(attachmentMetadata, id)?.contentType ?? '',
+      ).toLowerCase();
+      if (!id || !contentType.startsWith('video/')) return match;
+      const safeUrl = escapeHtmlText(absoluteUrl);
+      const safeLabel = escapeHtmlText(label.trim() || '视频');
+      return `<video controls playsInline preload="metadata" src="${safeUrl}" aria-label="${safeLabel}"><a href="${safeUrl}">${safeLabel}</a></video>`;
+    },
+  );
+}
+
 function isMalformedWebUrl(value) {
   if (!/^https?:\/\//i.test(value)) return false;
   try {
@@ -675,7 +792,7 @@ function escapeHtmlInQuotedValues(value) {
     )}`;
 }
 
-export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
+export function rewriteMarkdownUrls(markdown, documents, baseUrl, attachmentMetadata = new Map()) {
   const normalizedBaseUrl = normalizeOutlineUrl(baseUrl);
   const documentLinks = buildDocumentLinkMap(documents, normalizedBaseUrl);
   let codeFence;
@@ -733,6 +850,10 @@ export function rewriteMarkdownUrls(markdown, documents, baseUrl) {
         (match, prefix, value, suffix) =>
           `${prefix}${rewriteSrcSet(value, {baseUrl: normalizedBaseUrl, documentLinks})}${suffix}`,
       );
+      output = rewriteVideoAttachmentLinks(output, {
+        baseUrl: normalizedBaseUrl,
+        attachmentMetadata,
+      });
       output = removeInvalidMarkdownLinks(output);
       const normalizedOutput = output
         .replace(/<@([A-Za-z0-9_-]+)>/g, '&lt;@$1&gt;')
@@ -1027,7 +1148,12 @@ export async function generateOutlineOutput({
   await mkdir(stagedDocs, {recursive: true});
   try {
     const outputs = await mapConcurrent(assignedDocuments, async (document) => {
-      const markdown = rewriteMarkdownUrls(document.text, assignedDocuments, baseUrl);
+      const markdown = rewriteMarkdownUrls(
+        document.text,
+        assignedDocuments,
+        baseUrl,
+        snapshot.attachments,
+      );
       const relativeMedia = findRelativeMediaReferences(markdown);
       if (relativeMedia.length > 0) {
         throw new Error(

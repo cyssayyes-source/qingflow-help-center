@@ -15,9 +15,11 @@ import test from 'node:test';
 import {getContentPaths, getContentSource} from '../scripts/lib/content-source.mjs';
 import {
   assignDocumentRoutes,
+  collectOutlineAttachmentIds,
   createOutlineClient,
   disableProxyForOutline,
   fetchAllPages,
+  fetchOutlineAttachmentMetadata,
   fetchOutlineSnapshot,
   findRelativeMediaReferences,
   generateOutlineOutput,
@@ -187,6 +189,92 @@ test('snapshot requires exactly one collection with the configured name', async 
     }),
   };
   await assert.rejects(fetchOutlineSnapshot(duplicateClient, '售后知识库'), /Multiple/);
+});
+
+test('attachment metadata only scans ordinary Markdown links', () => {
+  const markdown = [
+    '![image](/api/attachments.redirect?id=image)',
+    '[video](/api/attachments.redirect?id=video)',
+    '[video again](https://outline.dev.oalite.com/api/attachments.redirect?id=video)',
+    '```md',
+    '[code](/api/attachments.redirect?id=code)',
+    '```',
+  ].join('\n');
+  assert.deepEqual(
+    collectOutlineAttachmentIds(markdown, baseUrl),
+    ['video'],
+  );
+});
+
+test('attachment MIME metadata is listed per document without downloading media', async () => {
+  const requests = [];
+  const client = {
+    async post(endpoint, payload) {
+      requests.push({endpoint, payload});
+      assert.equal(endpoint, 'attachments.list');
+      return {
+        data: [
+          {
+            id: 'video',
+            documentId: docIdOne,
+            contentType: 'video/mp4',
+            name: '宣传片.mov',
+          },
+          {
+            id: 'unused-image',
+            documentId: docIdOne,
+            contentType: 'image/png',
+          },
+        ],
+      };
+    },
+  };
+  const metadata = await fetchOutlineAttachmentMetadata(
+    client,
+    [
+      {
+        id: docIdOne,
+        text: '[宣传片](/api/attachments.redirect?id=video)\n\n![图片](/api/attachments.redirect?id=unused-image)',
+      },
+      {id: docIdTwo, text: 'No attachments'},
+    ],
+    baseUrl,
+  );
+
+  assert.deepEqual(requests, [
+    {
+      endpoint: 'attachments.list',
+      payload: {documentId: docIdOne, limit: 100, offset: 0},
+    },
+  ]);
+  assert.deepEqual(metadata.get('video'), {id: 'video', contentType: 'video/mp4'});
+  assert.equal(metadata.has('unused-image'), false);
+});
+
+test('video attachment links become embedded video elements by MIME type', () => {
+  const documents = [{id: docIdOne, urlId: 'one', url: '/doc/one', slug: '/outline/one'}];
+  const markdown = [
+    '[宣传片 640x360](/api/attachments.redirect?id=video)',
+    '[说明文档](/api/attachments.redirect?id=pdf)',
+    '![截图](/api/attachments.redirect?id=image)',
+  ].join('\n');
+  const rewritten = rewriteMarkdownUrls(
+    markdown,
+    documents,
+    baseUrl,
+    new Map([
+      ['video', {contentType: 'video/mp4'}],
+      ['pdf', {contentType: 'application/pdf'}],
+      ['image', {contentType: 'image/png'}],
+    ]),
+  );
+  assert.match(rewritten, /<video controls playsInline preload="metadata"/);
+  assert.match(
+    rewritten,
+    /src="https:\/\/outline\.dev\.oalite\.com\/api\/attachments\.redirect\?id=video"/,
+  );
+  assert.match(rewritten, /\[说明文档\]\(https:\/\/outline\.dev\.oalite\.com\/api\/attachments\.redirect\?id=pdf\)/);
+  assert.match(rewritten, /!\[截图\]\(https:\/\/outline\.dev\.oalite\.com\/api\/attachments\.redirect\?id=image\)/);
 });
 
 test('snapshot rejects wrong bodies and documents outside the navigation tree', async () => {
@@ -444,7 +532,11 @@ test('successful generation replaces the snapshot without creating local media',
     urlId: 'one',
     url: '/doc/guide-one',
     title: 'Guide',
-    text: 'Hello\n\n![Image](/api/attachments.redirect?id=image)',
+    text: [
+      'Hello',
+      '![Image](/api/attachments.redirect?id=image)',
+      '[Demo](/api/attachments.redirect?id=video)',
+    ].join('\n\n'),
     updatedAt: '2026-09-09T00:00:00.000Z',
     parents: [],
     slug: '/outline/one',
@@ -452,7 +544,11 @@ test('successful generation replaces the snapshot without creating local media',
   };
   const report = await generateOutlineOutput({
     cwd: root,
-    snapshot: {collection: {id: 'collection', name: '售后知识库'}, tree},
+    snapshot: {
+      collection: {id: 'collection', name: '售后知识库'},
+      tree,
+      attachments: new Map([['video', {contentType: 'video/mp4'}]]),
+    },
     assignedDocuments: [document],
     baseUrl,
   });
@@ -460,6 +556,7 @@ test('successful generation replaces the snapshot without creating local media',
   const output = await readFile(path.join(root, 'docs', 'generated', `${docIdOne}.mdx`), 'utf8');
   assert.match(output, /source: "outline"/);
   assert.match(output, /https:\/\/outline\.dev\.oalite\.com\/api\/attachments\.redirect\?id=image/);
+  assert.match(output, /<video controls playsInline preload="metadata"/);
   assert.equal(report.media, 'remote');
   await assert.rejects(access(path.join(root, 'static')));
 });

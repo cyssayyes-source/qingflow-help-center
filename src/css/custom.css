@@ -386,6 +386,18 @@ body {
   aspect-ratio: auto 16 / 9;
 }
 
+.theme-doc-markdown video {
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 6px;
+  display: block;
+  height: auto;
+  margin: 28px auto;
+  max-width: 100%;
+  width: 960px;
+}
+
 .theme-doc-markdown code {
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 4px;
