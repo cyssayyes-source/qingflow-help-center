@@ -2,6 +2,7 @@ import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {loadLocalEnvironment} from './lib/load-env.mjs';
 import {getContentPaths} from './lib/content-source.mjs';
+import {extractSearchSections} from './lib/search-sections.mjs';
 import {buildSearchTokens} from './lib/search-tokenizer.mjs';
 
 loadLocalEnvironment();
@@ -204,50 +205,6 @@ function normalizeSearchText(value) {
     .trim();
 }
 
-function cleanHeading(value) {
-  return value
-    .replace(/\s+#+\s*$/, '')
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
-    .replace(/[*_`~]/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .trim();
-}
-
-function extractSections(body) {
-  const lines = body.split('\n');
-  const headings = [];
-  let inCodeBlock = false;
-
-  lines.forEach((line, lineIndex) => {
-    if (/^\s*```/.test(line)) {
-      inCodeBlock = !inCodeBlock;
-      return;
-    }
-
-    if (inCodeBlock) return;
-    const match = line.match(/^(#{2,6})\s+(.+?)\s*$/);
-    if (match) {
-      headings.push({
-        level: match[1].length,
-        title: cleanHeading(match[2]),
-        lineIndex,
-      });
-    }
-  });
-
-  return headings
-    .map((heading, index) => {
-      const nextHeading = headings[index + 1];
-      const endLine = nextHeading?.lineIndex ?? lines.length;
-      return {
-        ...heading,
-        body: lines.slice(heading.lineIndex + 1, endLine).join('\n').trim(),
-      };
-    })
-    .filter((section) => section.title && section.title !== '');
-}
-
 function cleanMarkdown(body) {
   return body
     .replace(/\n---\s*\n+\[查看语雀原文\]\([^)]+\)\s*$/s, '')
@@ -307,24 +264,6 @@ function buildBreadcrumb(category, frontMatterKeywords, title, sectionTitle) {
   });
 
   return breadcrumb.join(' / ');
-}
-
-function slugifyHeading(value, usedSlugs) {
-  const base = value
-    .toLowerCase()
-    .trim()
-    .replace(/[\s\u3000]+/g, '-')
-    .replace(/[^\p{Letter}\p{Number}\p{Script=Han}-]/gu, '')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'section';
-  let slug = base;
-  let suffix = 2;
-  while (usedSlugs.has(slug)) {
-    slug = `${base}-${suffix}`;
-    suffix += 1;
-  }
-  usedSlugs.add(slug);
-  return slug;
 }
 
 function buildUrl(relativePath, attributes) {
@@ -414,8 +353,7 @@ async function main() {
     documentRecords.push(documentRecord);
     records.push(documentRecord);
 
-    const usedSlugs = new Set();
-    extractSections(cleanBody).forEach((section, sectionIndex) => {
+    extractSearchSections(cleanBody).forEach((section, sectionIndex) => {
       const sectionKeywords = buildSynonymKeywords(
         [section.title],
         synonymGroups,
@@ -432,7 +370,7 @@ async function main() {
         keywords: sectionKeywords,
         search_tokens: buildSearchTokens([section.title, section.body, title, category, ...tags]),
         content: normalizeContent(section.body),
-        url: `${buildUrl(relativePath, attributes)}#${slugifyHeading(section.title, usedSlugs)}`,
+        url: `${buildUrl(relativePath, attributes)}#${section.slug}`,
         product: 'qingflow',
         business_priority: businessPriority,
         version: 'current',
