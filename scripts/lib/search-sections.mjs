@@ -32,7 +32,11 @@ function getHeadingText(value) {
     .replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~])/g, '$1');
 }
 
-export function extractSearchSections(body) {
+function normalizeHeadingForComparison(value) {
+  return String(value).toLocaleLowerCase().replace(/[\s\u3000]+/g, '').trim();
+}
+
+export function extractSearchSections(body, documentTitle = '') {
   const lines = String(body).split('\n');
   const headings = [];
   const slugger = new GithubSlugger();
@@ -61,6 +65,8 @@ export function extractSearchSections(body) {
     });
   });
 
+  const normalizedDocumentTitle = normalizeHeadingForComparison(documentTitle);
+
   return headings
     .map((heading, index) => {
       const nextHeading = headings[index + 1];
@@ -71,5 +77,13 @@ export function extractSearchSections(body) {
           .trim(),
       };
     })
-    .filter((section) => section.level >= 2);
+    .filter(
+      (section, index) =>
+        !(
+          index === 0 &&
+          section.level === 1 &&
+          normalizedDocumentTitle &&
+          normalizeHeadingForComparison(section.title) === normalizedDocumentTitle
+        ),
+    );
 }

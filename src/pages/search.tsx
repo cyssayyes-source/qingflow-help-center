@@ -407,6 +407,13 @@ function renderSearchSnippet(snippet: ResultSnippet): ReactNode {
     : renderLocalSnippet(snippet.text, snippet.matches);
 }
 
+function renderHighlightedSearchText(value: string, query: string): ReactNode {
+  return renderLocalSnippet(
+    value,
+    findSearchMatches(value, getSearchHighlightTerms([query])),
+  );
+}
+
 function createGroupedSearchHit(hits: SearchHit[], query: string): SearchHit {
   const documents = hits
     .map((hit) => hit.document)
@@ -438,7 +445,7 @@ function createTypesenseSearch(
     query_by: 'title,section,keywords,tags,search_tokens,content',
     query_by_weights: '12,8,7,5,6,2',
     synonym_sets: `${collection}-synonyms`,
-    highlight_fields: 'title,keywords,content',
+    highlight_fields: 'title,document_title,section,keywords,content',
     prioritize_exact_match: true,
     prioritize_token_position: true,
     text_match_type: 'max_score',
@@ -796,9 +803,13 @@ export default function SearchPage(): ReactNode {
                         <div className={styles.resultTopline}>
                           <span>{document.breadcrumb ?? document.section ?? '帮助文档'}</span>
                         </div>
-                        <Heading as="h2">{sectionTitle ?? '未命名段落'}</Heading>
+                        <Heading as="h2">
+                          {renderHighlightedSearchText(sectionTitle ?? '未命名段落', query)}
+                        </Heading>
                         {documentTitle && documentTitle !== sectionTitle ? (
-                          <p className={styles.resultDocumentTitle}>{documentTitle}</p>
+                          <p className={styles.resultDocumentTitle}>
+                            {renderHighlightedSearchText(documentTitle, query)}
+                          </p>
                         ) : null}
                         <p>{renderSearchSnippet(snippet)}</p>
                         <ChevronRight className={styles.resultArrow} aria-hidden="true" size={21} />

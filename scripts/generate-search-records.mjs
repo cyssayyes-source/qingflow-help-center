@@ -353,7 +353,7 @@ async function main() {
     documentRecords.push(documentRecord);
     records.push(documentRecord);
 
-    extractSearchSections(cleanBody).forEach((section, sectionIndex) => {
+    extractSearchSections(cleanBody, title).forEach((section, sectionIndex) => {
       const sectionKeywords = buildSynonymKeywords(
         [section.title],
         synonymGroups,

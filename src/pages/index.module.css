@@ -2,13 +2,15 @@
   background: #f7f7f8;
   border-bottom: 1px solid #e5e5e7;
   isolation: isolate;
-  overflow: hidden;
+  overflow: visible;
   padding: 72px 0 64px;
   position: relative;
+  z-index: 1;
 }
 
 .flowScene {
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
   position: absolute;
   z-index: 1;
@@ -152,6 +154,7 @@
   position: absolute;
   right: 0;
   top: calc(100% + 7px);
+  z-index: 3;
 }
 
 .searchMatch,

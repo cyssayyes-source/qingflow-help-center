@@ -84,6 +84,43 @@ test('grouped search requests details only when the initial group lacks a matchi
   );
 });
 
+test('document title matches open the document while subheading matches open the section', () => {
+  const documentRecord = {
+    record_type: 'document',
+    title: '外部用户',
+    document_title: '外部用户',
+    content: '介绍协同使用方式。',
+    url: '/docs/external-users/',
+  };
+  const firstSection = {
+    record_type: 'section',
+    title: '简介',
+    section: '简介',
+    document_title: '外部用户',
+    content: '介绍协同使用方式。',
+    url: '/docs/external-users/#简介',
+  };
+  const targetSection = {
+    record_type: 'section',
+    title: '管理员添加外部用户',
+    section: '管理员添加外部用户',
+    document_title: '外部用户',
+    content: '配置邀请权限。',
+    url: '/docs/external-users/#管理员添加外部用户',
+  };
+
+  assert.equal(
+    selectGroupedSearchResult([firstSection, documentRecord, targetSection], ['外部用户'])
+      .displayDocument,
+    documentRecord,
+  );
+  assert.equal(
+    selectGroupedSearchResult([firstSection, documentRecord, targetSection], ['管理员添加'])
+      .displayDocument,
+    targetSection,
+  );
+});
+
 test('search highlighting preserves an existing query string and anchor', () => {
   assert.equal(
     addSearchHighlightToUrl('/docs/approval/?lang=zh#settings', '审批 配置'),

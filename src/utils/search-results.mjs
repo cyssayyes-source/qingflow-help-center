@@ -146,12 +146,29 @@ export function createMultiSearchSnippet(documents, variants, maxSnippets = 3) {
   return {text, matches: findSearchMatches(text, getSearchHighlightTerms(variants))};
 }
 
-function scoreSectionDocument(document, variants, index) {
-  const heading = asText(document?.section || document?.title);
+function getRecordHeading(document) {
+  return document?.record_type === 'section'
+    ? asText(document.section || document.title)
+    : asText(document?.document_title || document?.title);
+}
+
+function scoreSearchDocument(document, variants, index) {
+  const heading = getRecordHeading(document);
   const content = asText(document?.content);
   const headingMatches = findRelevantMatches(heading, variants).length;
   const contentMatches = findRelevantMatches(content, variants).length;
-  return headingMatches * 100 + Math.min(contentMatches, 20) * 8 - index / 1000;
+  const normalizedHeading = normalizeSearchText(heading);
+  const exactHeadingMatch = (variants ?? []).some(
+    (variant) => normalizeSearchText(variant) === normalizedHeading,
+  );
+  const headingWeight = document?.record_type === 'section' ? 400 : 300;
+  const contentWeight = document?.record_type === 'section' ? 8 : 1;
+  return (
+    (exactHeadingMatch ? 1000 : 0) +
+    headingMatches * headingWeight +
+    Math.min(contentMatches, 20) * contentWeight -
+    index / 1000
+  );
 }
 
 export function hasMatchingSection(documents, variants) {
@@ -191,12 +208,20 @@ export function selectGroupedSearchResult(documents, variants) {
       variants,
     ).length > 0,
   );
-  const candidates = matchingSections.length > 0 ? matchingSections : entries;
+  const matchingDocuments = entries.filter((document) =>
+    document.record_type !== 'section' &&
+    findRelevantMatches(
+      `${getRecordHeading(document)}\n${asText(document.content)}`,
+      variants,
+    ).length > 0,
+  );
+  const directMatches = [...matchingSections, ...matchingDocuments];
+  const candidates = directMatches.length > 0 ? directMatches : entries;
   const displayDocument = candidates.reduce((best, document, index) => {
     if (!best) return document;
     const bestIndex = candidates.indexOf(best);
-    return scoreSectionDocument(document, variants, index) >
-      scoreSectionDocument(best, variants, bestIndex)
+    return scoreSearchDocument(document, variants, index) >
+      scoreSearchDocument(best, variants, bestIndex)
       ? document
       : best;
   }, undefined);
