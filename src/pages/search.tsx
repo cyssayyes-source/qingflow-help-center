@@ -707,6 +707,8 @@ export default function SearchPage(): ReactNode {
                 <Search aria-hidden="true" size={21} />
                 <input
                   className={styles.searchInput}
+                  id="docs-search"
+                  name="q"
                   type="search"
                   placeholder="例如：审批中心怎么配置"
                   aria-label="搜索帮助文档"

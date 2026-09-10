@@ -380,6 +380,12 @@ body {
   max-width: 100%;
 }
 
+/* Outline Markdown images usually do not include intrinsic dimensions. Reserve
+ * a stable placeholder while lazy images load, then let the natural ratio win. */
+.theme-doc-markdown img:not([width][height]) {
+  aspect-ratio: auto 16 / 9;
+}
+
 .theme-doc-markdown code {
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 4px;

@@ -163,6 +163,7 @@ function HelpSearch() {
         <Search aria-hidden="true" size={22} strokeWidth={2} />
         <input
           ref={inputRef}
+          id="home-docs-search"
           type="search"
           name="q"
           value={query}
