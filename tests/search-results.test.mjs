@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addSearchHighlightToUrl,
+  buildSearchQuery,
   createMultiSearchSnippet,
+  getSearchQueryTerms,
   hasMatchingSection,
   rankSearchDocuments,
   rankSearchResults,
@@ -10,6 +12,37 @@ import {
   mergeSearchDocuments,
   selectGroupedSearchResult,
 } from '../src/utils/search-results.mjs';
+
+test('natural-language Chinese queries remove question fillers without losing intent', () => {
+  assert.deepEqual(getSearchQueryTerms('审批中心怎么配置？'), ['审批中心', '配置']);
+  assert.equal(buildSearchQuery('如何导入 Markdown 文档？'), '导入 markdown 文档');
+  assert.equal(
+    buildSearchQuery('审批中心怎么配置？', [
+      {terms: ['待办中心', '审批中心', '待办工作台', '审批工作台']},
+    ]),
+    '待办中心 配置',
+  );
+});
+
+test('natural-language ranking can use product terminology synonyms', () => {
+  const target = {
+    record_type: 'document',
+    title: '待办中心',
+    document_title: '待办中心',
+    content: '支持配置卡片显示字段和待办操作。',
+    url: '/docs/todo-center/',
+  };
+  const genericConfiguration = {
+    record_type: 'section',
+    title: '配置路径',
+    document_title: '连接中心',
+    content: '配置第三方连接。',
+    url: '/docs/connections/#configuration',
+  };
+  const variants = ['审批中心怎么配置', '待办中心', '审批工作台', '待办工作台'];
+
+  assert.equal(rankSearchDocuments([genericConfiguration, target], variants)[0], target);
+});
 
 test('search snippets keep distant matches as separate contextual excerpts', () => {
   const leading = '这里是开头内容。'.repeat(16);

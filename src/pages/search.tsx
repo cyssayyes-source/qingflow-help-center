@@ -18,6 +18,7 @@ import {
 import styles from './search.module.css';
 import {
   addSearchHighlightToUrl,
+  buildSearchQuery,
   createMultiSearchSnippet,
   findSearchMatches,
   getSearchHighlightTerms,
@@ -318,11 +319,11 @@ function renderHighlightedSearchText(value: string, query: string): ReactNode {
   );
 }
 
-function createGroupedSearchHit(hits: SearchHit[], query: string): SearchHit {
+function createGroupedSearchHit(hits: SearchHit[], variants: string[]): SearchHit {
   const documents = hits
     .map((hit) => hit.document)
     .filter((document): document is SearchDocument => Boolean(document));
-  const {displayDocument, snippetDocuments} = selectGroupedSearchResult(documents, [query]);
+  const {displayDocument, snippetDocuments} = selectGroupedSearchResult(documents, variants);
   const selectedHit = hits.find((hit) => hit.document === displayDocument) ?? hits[0];
 
   return {
@@ -342,12 +343,12 @@ function getSearchDocumentKey(document: SearchDocument | undefined): string {
   return document?.doc_id ?? document?.url ?? document?.title ?? '';
 }
 
-function getSearchHitBusinessScore(hit: SearchHit, query: string): number {
+function getSearchHitBusinessScore(hit: SearchHit, variants: string[]): number {
   const documents = [hit.document, ...(hit.matchingDocuments ?? [])].filter(
     (document): document is SearchDocument => Boolean(document),
   );
   return documents.reduce(
-    (best, document) => Math.max(best, scoreSearchDocument(document, [query])),
+    (best, document) => Math.max(best, scoreSearchDocument(document, variants)),
     0,
   );
 }
@@ -407,6 +408,7 @@ export function createTypesenseSearch(
     dropTokensThreshold?: number;
     excludeFields?: string;
     groupLimit?: number;
+    textMatchType?: 'max_score' | 'max_weight';
   } = {},
 ) {
   return {
@@ -419,7 +421,7 @@ export function createTypesenseSearch(
     prioritize_exact_match: true,
     prioritize_token_position: true,
     demote_synonym_match: true,
-    text_match_type: 'max_score',
+    text_match_type: options.textMatchType ?? 'max_score',
     prefix: 'true,true,true,true,false,true',
     num_typos: 1,
     page: options.page ?? 1,
@@ -449,6 +451,7 @@ export default function SearchPage(): ReactNode {
   const searchIndexPath = useBaseUrl('/search-records.json');
   const searchSynonymsPath = useBaseUrl('/search-synonyms.json');
   const localIndexPromise = useRef<Promise<LocalSearchData> | null>(null);
+  const synonymGroupsPromise = useRef<Promise<SynonymGroup[]> | null>(null);
   const customFields = (siteConfig.customFields ?? {}) as {
     typesense?: {
       host?: string;
@@ -467,21 +470,34 @@ export default function SearchPage(): ReactNode {
   const typesense = customFields.typesense ?? {};
   const canUseTypesense = Boolean(typesense.host && typesense.searchApiKey);
 
+  function getSynonymGroups() {
+    if (!synonymGroupsPromise.current) {
+      synonymGroupsPromise.current = fetch(searchSynonymsPath)
+        .then(async (response) => {
+          if (!response.ok) return [];
+          const synonyms: unknown = await response.json();
+          return Array.isArray(synonyms) ? (synonyms as SynonymGroup[]) : [];
+        })
+        .catch(() => []);
+    }
+
+    return synonymGroupsPromise.current;
+  }
+
   function getLocalDocuments() {
     if (!localIndexPromise.current) {
       localIndexPromise.current = Promise.all([
         fetch(searchIndexPath),
-        fetch(searchSynonymsPath),
+        getSynonymGroups(),
       ])
-        .then(async ([documentsResponse, synonymsResponse]) => {
+        .then(async ([documentsResponse, synonymGroups]) => {
           if (!documentsResponse.ok) {
             throw new Error(`Local search index responded with ${documentsResponse.status}`);
           }
           const documents: unknown = await documentsResponse.json();
-          const synonyms: unknown = synonymsResponse.ok ? await synonymsResponse.json() : [];
           return {
             documents: Array.isArray(documents) ? (documents as SearchDocument[]) : localDocuments,
-            synonymGroups: Array.isArray(synonyms) ? (synonyms as SynonymGroup[]) : [],
+            synonymGroups,
           };
         })
         .catch(() => ({documents: localDocuments, synonymGroups: []}));
@@ -524,7 +540,12 @@ export default function SearchPage(): ReactNode {
     const host = typesense.host?.replace(/\/$/, '');
     const collection = typesense.collection || 'qingflow_help_docs';
     try {
-      const requestRelaxedCandidates = shouldRequestRelaxedCandidates(trimmedQuery);
+      const synonymGroups = await getSynonymGroups();
+      const queryVariants = expandQuery(trimmedQuery, synonymGroups);
+      const searchQuery = buildSearchQuery(trimmedQuery, synonymGroups);
+      const isNaturalLanguageQuery =
+        normalizeSearchText(searchQuery) !== normalizeSearchText(trimmedQuery);
+      const requestRelaxedCandidates = shouldRequestRelaxedCandidates(searchQuery);
       const response = await fetch(`${host}/multi_search`, {
         method: 'POST',
         headers: {
@@ -533,21 +554,23 @@ export default function SearchPage(): ReactNode {
         },
         body: JSON.stringify({
           searches: [
-            createTypesenseSearch(collection, trimmedQuery, {
+            createTypesenseSearch(collection, searchQuery, {
               page: nextPage,
               perPage: PAGE_SIZE,
               groupByDocument: true,
               excludeFields: 'search_tokens',
+              textMatchType: isNaturalLanguageQuery ? 'max_weight' : 'max_score',
             }),
             ...(requestRelaxedCandidates
               ? [
-                  createTypesenseSearch(collection, trimmedQuery, {
+                  createTypesenseSearch(collection, searchQuery, {
                     page: 1,
                     perPage: RELAXED_CANDIDATE_LIMIT,
                     groupByDocument: true,
                     dropTokensThreshold: PAGE_SIZE,
                     excludeFields: 'content,search_tokens',
                     groupLimit: 1,
+                    textMatchType: isNaturalLanguageQuery ? 'max_weight' : 'max_score',
                   }),
                 ]
               : []),
@@ -583,7 +606,7 @@ export default function SearchPage(): ReactNode {
           (group): group is {index: number; documentId: string; documents: SearchDocument[]} =>
             !useRelaxedCandidates &&
             Boolean(group.documentId) &&
-            !hasMatchingSection(group.documents, [trimmedQuery]),
+            !hasMatchingSection(group.documents, queryVariants),
         );
       const detailDocumentsByGroup = new Map<number, SearchDocument[]>();
 
@@ -596,9 +619,10 @@ export default function SearchPage(): ReactNode {
           },
           body: JSON.stringify({
             searches: missingSectionDetails.map(({documentId}) =>
-              createTypesenseSearch(collection, trimmedQuery, {
+              createTypesenseSearch(collection, searchQuery, {
                 filterBy: createExactDocumentFilter(documentId),
                 excludeFields: 'search_tokens',
+                textMatchType: isNaturalLanguageQuery ? 'max_weight' : 'max_score',
               }),
             ),
           }),
@@ -619,7 +643,7 @@ export default function SearchPage(): ReactNode {
       const hits: SearchHit[] = groupedSearchHits.map((groupHits, index) => {
         const detailDocuments = detailDocumentsByGroup.get(index) ?? [];
         if (detailDocuments.length === 0) {
-          return createGroupedSearchHit(groupHits, trimmedQuery);
+          return createGroupedSearchHit(groupHits, queryVariants);
         }
         const mergedDocuments = mergeSearchDocuments(
           detailDocuments,
@@ -627,10 +651,10 @@ export default function SearchPage(): ReactNode {
         );
         return createGroupedSearchHit(
           mergedDocuments.map((document) => ({document})),
-          trimmedQuery,
+          queryVariants,
         );
       });
-      const rankedHits = rankSearchResults(hits, [trimmedQuery]) as SearchHit[];
+      const rankedHits = rankSearchResults(hits, queryVariants) as SearchHit[];
       const strictDocumentKeys = new Set(
         strictGroups
           .map((group) => getSearchDocumentKey(getDocumentsFromHits(group)[0]))
@@ -642,14 +666,14 @@ export default function SearchPage(): ReactNode {
       const relaxedHits = rankedHits.filter(
         (hit) =>
           !strictDocumentKeys.has(getSearchDocumentKey(hit.document)) &&
-          getSearchHitBusinessScore(hit, trimmedQuery) > 0,
+          getSearchHitBusinessScore(hit, queryVariants) > 0,
       );
       const preferredRelaxedHits = [
         ...relaxedHits.filter((hit) => hit.document?.record_type !== 'section'),
         ...relaxedHits.filter((hit) => hit.document?.record_type === 'section'),
       ].slice(0, RELAXED_RESULT_LIMIT);
       const displayedHits = useRelaxedCandidates
-        ? rankSearchResults([...strictHits, ...preferredRelaxedHits], [trimmedQuery])
+        ? rankSearchResults([...strictHits, ...preferredRelaxedHits], queryVariants)
         : rankedHits;
       const found = useRelaxedCandidates
         ? displayedHits.length
@@ -820,6 +844,12 @@ export default function SearchPage(): ReactNode {
                       : document.title;
                   const documentTitle = document.document_title ?? document.title;
                   const snippet = getResultSnippet(result, query);
+                  const breadcrumbItems = String(
+                    document.breadcrumb ?? document.section ?? '帮助文档',
+                  )
+                    .split(/\s+\/\s+/u)
+                    .map((item) => item.trim())
+                    .filter(Boolean);
                   const destination = addSearchHighlightToUrl(
                     document.url ?? '/docs/getting-started',
                     query,
@@ -829,7 +859,13 @@ export default function SearchPage(): ReactNode {
                     <article key={`${document.url ?? 'result'}-${index}`} className={styles.resultRow}>
                       <Link to={destination}>
                         <div className={styles.resultTopline}>
-                          <span>{document.breadcrumb ?? document.section ?? '帮助文档'}</span>
+                          {breadcrumbItems.map((item, breadcrumbIndex) => (
+                            <span
+                              className={styles.breadcrumbItem}
+                              key={`${item}-${breadcrumbIndex}`}>
+                              {item}
+                            </span>
+                          ))}
                         </div>
                         <Heading as="h2">
                           {renderHighlightedSearchText(sectionTitle ?? '未命名段落', query)}

@@ -63,8 +63,83 @@ export function findSearchMatches(value, variants) {
     }, []);
 }
 
+const CHINESE_QUESTION_FILLERS = [
+  '我想知道',
+  '我想了解',
+  '在哪里',
+  '怎么办',
+  '为什么',
+  '是什么',
+  '什么是',
+  '请问',
+  '怎么',
+  '如何',
+  '怎样',
+  '为何',
+  '是否',
+  '能否',
+  '可否',
+  '可以',
+  '能够',
+  '哪里',
+  '在哪',
+];
+const CHINESE_QUESTION_FILLER_PATTERN = new RegExp(
+  CHINESE_QUESTION_FILLERS.join('|'),
+  'gu',
+);
+
+function splitChineseSearchToken(value) {
+  return value
+    .replace(CHINESE_QUESTION_FILLER_PATTERN, ' ')
+    .replace(/[吗呢呀吧么？?]+$/gu, ' ')
+    .split(/\s+/u)
+    .filter(Boolean);
+}
+
+export function getSearchQueryTerms(value) {
+  return (asText(value).toLowerCase().match(/[\p{Script=Han}]+|[a-z0-9]+/giu) ?? [])
+    .flatMap((token) =>
+      /^\p{Script=Han}+$/u.test(token) ? splitChineseSearchToken(token) : token,
+    )
+    .filter(Boolean);
+}
+
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceSearchTermWithCanonical(term, synonymGroups) {
+  let result = term;
+
+  for (const group of synonymGroups ?? []) {
+    const terms = Array.isArray(group?.terms) ? group.terms.filter(Boolean).map(String) : [];
+    const canonical = terms[0];
+    if (!canonical) continue;
+
+    const matchedAlias = [...terms]
+      .sort((left, right) => right.length - left.length)
+      .find((alias) => normalizeSearchText(result).includes(normalizeSearchText(alias)));
+    if (!matchedAlias) continue;
+
+    result = result.replace(
+      new RegExp(escapeRegularExpression(matchedAlias), 'giu'),
+      canonical,
+    );
+  }
+
+  return result;
+}
+
+export function buildSearchQuery(value, synonymGroups = []) {
+  const terms = getSearchQueryTerms(value).map((term) =>
+    replaceSearchTermWithCanonical(term, synonymGroups),
+  );
+  return terms.length > 0 ? terms.join(' ') : asText(value).trim();
+}
+
 function extractSearchTokens(value) {
-  return asText(value).toLowerCase().match(/[\p{Script=Han}]+|[a-z0-9]+/giu) ?? [];
+  return getSearchQueryTerms(value);
 }
 
 const SNIPPET_CONTEXT_BEFORE = 40;
@@ -378,14 +453,17 @@ function getScoringFields(document) {
  * are synonym expansions and intentionally receive a lower multiplier.
  */
 export function scoreSearchDocument(document, variants, index = 0) {
+  const sourceVariants = Array.from(
+    new Set((variants ?? []).map((variant) => asText(variant).trim()).filter(Boolean)),
+  );
   const normalizedVariants = Array.from(
-    new Set((variants ?? []).map(normalizeSearchText).filter(Boolean)),
+    new Set(sourceVariants.map(normalizeSearchText).filter(Boolean)),
   );
   if (normalizedVariants.length === 0) return 0;
 
   const directVariant = normalizedVariants[0];
-  const directTerms = Array.from(new Set(extractSearchTokens(directVariant)));
-  const {primary: variantTerms, fragments} = buildScoringTerms(normalizedVariants);
+  const directTerms = Array.from(new Set(extractSearchTokens(sourceVariants[0])));
+  const {primary: variantTerms, fragments} = buildScoringTerms(sourceVariants);
   const matchedDirectTerms = new Set();
   const matchedFragments = new Set();
   let matchedSynonymPhrase = false;

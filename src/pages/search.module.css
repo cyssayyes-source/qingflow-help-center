@@ -214,14 +214,34 @@
 .resultTopline {
   align-items: center;
   display: flex;
-  gap: 9px;
+  flex-wrap: wrap;
   margin-bottom: 6px;
+  row-gap: 2px;
 }
 
-.resultTopline span {
+.breadcrumbItem {
+  align-items: center;
   color: #5968e8;
+  display: inline-flex;
   font-size: 11px;
   font-weight: 700;
+}
+
+.breadcrumbItem::after {
+  border-color: currentColor;
+  border-style: solid;
+  border-width: 1px 1px 0 0;
+  content: '';
+  display: inline-block;
+  height: 5px;
+  margin: 0 8px 0 6px;
+  opacity: 0.65;
+  transform: rotate(45deg);
+  width: 5px;
+}
+
+.breadcrumbItem:last-child::after {
+  content: none;
 }
 
 .resultTopline small {

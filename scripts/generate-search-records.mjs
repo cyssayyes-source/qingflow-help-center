@@ -2,6 +2,7 @@ import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {loadLocalEnvironment} from './lib/load-env.mjs';
 import {getContentPaths} from './lib/content-source.mjs';
+import {buildBreadcrumb} from './lib/search-breadcrumb.mjs';
 import {extractSearchSections} from './lib/search-sections.mjs';
 import {buildSearchTokens} from './lib/search-tokenizer.mjs';
 
@@ -248,22 +249,6 @@ function buildSynonymKeywords(values, synonymGroups, sourceValues = values) {
   });
 
   return Array.from(keywords);
-}
-
-function buildBreadcrumb(category, frontMatterKeywords, title, sectionTitle) {
-  const parts = [category, ...frontMatterKeywords, title, sectionTitle]
-    .map((part) => String(part ?? '').trim())
-    .filter(Boolean);
-  const breadcrumb = [];
-
-  parts.forEach((part) => {
-    const previous = breadcrumb[breadcrumb.length - 1];
-    if (normalizeSearchText(previous) !== normalizeSearchText(part)) {
-      breadcrumb.push(part);
-    }
-  });
-
-  return breadcrumb.join(' / ');
 }
 
 function buildUrl(relativePath, attributes) {
