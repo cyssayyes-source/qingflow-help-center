@@ -1,11 +1,12 @@
-import type {FormEvent, ReactNode} from 'react';
-import {useEffect, useRef, useState} from 'react';
+import type {ReactNode} from 'react';
+import {useState} from 'react';
 import Link from '@docusaurus/Link';
 import {useHistory} from '@docusaurus/router';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import HomeFlowScene from '@site/src/components/HomeFlowScene';
+import SearchCombobox from '@site/src/components/SearchCombobox';
 import {
   ArrowRight,
   BookOpen,
@@ -13,10 +14,8 @@ import {
   ChevronRight,
   CircleHelp,
   Code2,
-  Command,
   FileInput,
   GitBranch,
-  Search,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -110,108 +109,24 @@ const popularQuestions = [
 ];
 
 function HelpSearch() {
-  const inputRef = useRef<HTMLInputElement>(null);
   const searchPath = useBaseUrl('/search');
   const history = useHistory();
   const [query, setQuery] = useState('');
-  const normalizedQuery = query.trim().toLowerCase();
-  const matchedGuides = normalizedQuery
-    ? guides.filter((guide) =>
-        `${guide.title} ${guide.description} ${guide.keywords}`
-          .toLowerCase()
-          .includes(normalizedQuery),
-      )
-    : [];
-
-  useEffect(() => {
-    const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTyping =
-        target?.tagName === 'INPUT' ||
-        target?.tagName === 'TEXTAREA' ||
-        target?.isContentEditable;
-      const isCommand =
-        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k';
-
-      if (isCommand || (event.key === '/' && !isTyping)) {
-        event.preventDefault();
-        inputRef.current?.focus();
-      }
-    };
-
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
-  }, []);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!query.trim()) {
-      inputRef.current?.focus();
-      return;
-    }
-
-    history.push(`${searchPath}?q=${encodeURIComponent(query.trim())}`);
-  }
-
-  function preloadSearchPage() {
-    window.docusaurus?.preload(searchPath);
-  }
 
   return (
-    <div className={styles.searchShell}>
-      <form className={styles.searchBox} onSubmit={handleSubmit}>
-        <Search aria-hidden="true" size={22} strokeWidth={2} />
-        <input
-          ref={inputRef}
-          id="home-docs-search"
-          type="search"
-          name="q"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onFocus={preloadSearchPage}
-          onMouseEnter={preloadSearchPage}
-          placeholder="搜索功能、操作或问题"
-          aria-label="搜索帮助文档"
-          autoComplete="off"
-        />
-        <span className={styles.shortcut} aria-hidden="true">
-          <Command size={13} />K
-        </span>
-        <button
-          type="submit"
-          aria-label="提交搜索"
-          data-umami-event="search"
-          data-umami-event-location="home">
-          <ArrowRight size={19} />
-        </button>
-      </form>
-
-      {normalizedQuery ? (
-        <div className={styles.searchMatches} aria-live="polite">
-          {matchedGuides.length > 0 ? (
-            matchedGuides.slice(0, 4).map((guide) => {
-              const Icon = guide.icon;
-              return (
-                <Link key={guide.title} to={guide.to} className={styles.searchMatch}>
-                  <Icon aria-hidden="true" size={18} />
-                  <span>
-                    <strong>{guide.title}</strong>
-                    <small>{guide.description}</small>
-                  </span>
-                  <ChevronRight aria-hidden="true" size={17} />
-                </Link>
-              );
-            })
-          ) : (
-            <Link className={styles.searchAll} to={`/search?q=${encodeURIComponent(query)}`}>
-              <Search aria-hidden="true" size={18} />
-              搜索“{query}”的全部结果
-              <ChevronRight aria-hidden="true" size={17} />
-            </Link>
-          )}
-        </div>
-      ) : null}
-    </div>
+    <SearchCombobox
+      className={styles.searchShell}
+      value={query}
+      onChange={setQuery}
+      onSubmit={(nextQuery) => {
+        history.push(`${searchPath}?q=${encodeURIComponent(nextQuery)}`);
+      }}
+      variant="home"
+      analyticsLocation="home"
+      inputId="home-docs-search"
+      placeholder="搜索功能、操作或问题"
+      enableShortcut
+    />
   );
 }
 

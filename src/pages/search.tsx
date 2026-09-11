@@ -1,12 +1,12 @@
-import type {FormEvent, ReactNode} from 'react';
+import type {ReactNode} from 'react';
 import {useEffect, useRef, useState} from 'react';
 import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import SearchCombobox from '@site/src/components/SearchCombobox';
 import {
-  ArrowRight,
   ChevronLeft,
   ChevronRight,
   FileSearch,
@@ -30,6 +30,11 @@ import {
   scoreSearchDocument,
   selectGroupedSearchResult,
 } from '../utils/search-results.mjs';
+import {
+  createTypesenseSearch,
+  expandSearchQuery,
+  getGroupedSearchHits,
+} from '../utils/search-client.mjs';
 
 type SearchDocument = {
   id?: string;
@@ -135,20 +140,6 @@ const localDocuments: SearchDocument[] = [
   },
 ];
 
-function expandQuery(query: string, synonymGroups: SynonymGroup[]): string[] {
-  const variants = new Set([query]);
-  const normalizedQuery = normalizeSearchText(query);
-
-  synonymGroups.forEach(({terms}) => {
-    const normalizedTerms = terms.map(normalizeSearchText);
-    if (normalizedTerms.some((term) => normalizedQuery.includes(term))) {
-      terms.forEach((term) => variants.add(term));
-    }
-  });
-
-  return Array.from(variants);
-}
-
 function shouldRequestRelaxedCandidates(query: string): boolean {
   const terms = query.toLowerCase().match(/[\p{Script=Han}]+|[a-z0-9]+/giu) ?? [];
   const chineseCharacterCount = Array.from(query).filter((character) =>
@@ -167,7 +158,7 @@ function searchLocalDocuments(
   page: number,
   perPage: number,
 ): SearchPageResult {
-  const variants = expandQuery(query, synonymGroups).map(normalizeSearchText);
+  const variants = expandSearchQuery(query, synonymGroups).map(normalizeSearchText);
   const matchesByDocument = new Map<
     string,
     Array<{document: SearchDocument; score: number; businessPriority: number}>
@@ -353,21 +344,6 @@ function getSearchHitBusinessScore(hit: SearchHit, variants: string[]): number {
   );
 }
 
-function getGroupedSearchHits(searchResult: {
-  grouped_hits?: unknown;
-  hits?: unknown;
-}): SearchHit[][] {
-  const groupedHits = Array.isArray(searchResult.grouped_hits)
-    ? searchResult.grouped_hits
-    : [];
-  if (groupedHits.length > 0) {
-    return groupedHits.map((group: {hits?: SearchHit[]}) => group.hits ?? []);
-  }
-  return Array.isArray(searchResult.hits)
-    ? searchResult.hits.map((hit: SearchHit) => [hit])
-    : [];
-}
-
 function mergeGroupedSearchHits(
   primaryGroups: SearchHit[][],
   fallbackGroups: SearchHit[][],
@@ -395,50 +371,6 @@ function mergeGroupedSearchHits(
     groups.set(key, mergedHits);
   });
   return Array.from(groups.values());
-}
-
-export function createTypesenseSearch(
-  collection: string,
-  query: string,
-  options: {
-    page?: number;
-    perPage?: number;
-    filterBy?: string;
-    groupByDocument?: boolean;
-    dropTokensThreshold?: number;
-    excludeFields?: string;
-    groupLimit?: number;
-    textMatchType?: 'max_score' | 'max_weight';
-  } = {},
-) {
-  return {
-    collection,
-    q: query,
-    query_by: 'title,document_title,keywords,tags,search_tokens,content',
-    query_by_weights: '16,14,7,5,6,2',
-    synonym_sets: `${collection}-synonyms`,
-    highlight_fields: 'title,document_title,section,keywords,content',
-    prioritize_exact_match: true,
-    prioritize_token_position: true,
-    demote_synonym_match: true,
-    text_match_type: options.textMatchType ?? 'max_score',
-    prefix: 'true,true,true,true,false,true',
-    num_typos: 1,
-    page: options.page ?? 1,
-    per_page: options.perPage ?? GROUP_HIT_LIMIT,
-    ...(options.dropTokensThreshold
-      ? {drop_tokens_threshold: options.dropTokensThreshold}
-      : {}),
-    ...(options.excludeFields ? {exclude_fields: options.excludeFields} : {}),
-    ...(options.filterBy ? {filter_by: options.filterBy} : {}),
-    ...(options.groupByDocument
-      ? {
-          group_by: 'doc_id',
-          group_limit: options.groupLimit ?? GROUP_HIT_LIMIT,
-        }
-      : {}),
-    sort_by: '_text_match:desc,business_priority:desc,updated_at_ts:desc',
-  };
 }
 
 function createExactDocumentFilter(documentId: string): string {
@@ -541,7 +473,7 @@ export default function SearchPage(): ReactNode {
     const collection = typesense.collection || 'qingflow_help_docs';
     try {
       const synonymGroups = await getSynonymGroups();
-      const queryVariants = expandQuery(trimmedQuery, synonymGroups);
+      const queryVariants = expandSearchQuery(trimmedQuery, synonymGroups);
       const searchQuery = buildSearchQuery(trimmedQuery, synonymGroups);
       const isNaturalLanguageQuery =
         normalizeSearchText(searchQuery) !== normalizeSearchText(trimmedQuery);
@@ -587,11 +519,11 @@ export default function SearchPage(): ReactNode {
       const strictFound = Number.isFinite(searchResult.found)
         ? Math.max(0, Number(searchResult.found))
         : 0;
-      const strictGroups = getGroupedSearchHits(searchResult);
+      const strictGroups = getGroupedSearchHits(searchResult) as SearchHit[][];
       const relaxedSearchResult = requestRelaxedCandidates
         ? payload.results?.[1] ?? {}
         : {};
-      const relaxedGroups = getGroupedSearchHits(relaxedSearchResult);
+      const relaxedGroups = getGroupedSearchHits(relaxedSearchResult) as SearchHit[][];
       const useRelaxedCandidates = strictFound < PAGE_SIZE && relaxedGroups.length > 0;
       const groupedSearchHits = useRelaxedCandidates
         ? mergeGroupedSearchHits(strictGroups, relaxedGroups)
@@ -730,10 +662,10 @@ export default function SearchPage(): ReactNode {
     window.history.replaceState({}, '', nextUrl);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    updateUrl(query, 1);
-    void runSearch(query, 1);
+  function handleSubmit(nextQuery: string) {
+    setQuery(nextQuery);
+    updateUrl(nextQuery, 1);
+    void runSearch(nextQuery, 1);
   }
 
   function handleSuggestion(nextQuery: string) {
@@ -762,26 +694,16 @@ export default function SearchPage(): ReactNode {
               </p>
               <Heading as="h1">搜索帮助文档</Heading>
               <p>描述你遇到的问题，查找相关功能说明、操作步骤和最佳实践。</p>
-              <form className={styles.searchForm} onSubmit={handleSubmit}>
-                <Search aria-hidden="true" size={21} />
-                <input
-                  className={styles.searchInput}
-                  id="docs-search"
-                  name="q"
-                  type="search"
-                  placeholder="例如：审批中心怎么配置"
-                  aria-label="搜索帮助文档"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  data-umami-event="search"
-                  data-umami-event-location="search-page">
-                  搜索 <ArrowRight aria-hidden="true" size={18} />
-                </button>
-              </form>
+              <SearchCombobox
+                value={query}
+                onChange={setQuery}
+                onSubmit={handleSubmit}
+                variant="search-page"
+                analyticsLocation="search-page"
+                inputId="docs-search"
+                placeholder="例如：审批中心怎么配置"
+                autoFocus
+              />
               <div className={styles.suggestions}>
                 <span>热门搜索</span>
                 {['导入 Markdown 文档', '审批中心怎么配置', '私有化部署拓扑'].map(

@@ -5,6 +5,7 @@ import {getContentPaths} from './lib/content-source.mjs';
 import {buildBreadcrumb} from './lib/search-breadcrumb.mjs';
 import {extractSearchSections} from './lib/search-sections.mjs';
 import {buildSearchTokens} from './lib/search-tokenizer.mjs';
+import {createSearchSuggestionRecords} from '../src/utils/search-suggestions.mjs';
 
 loadLocalEnvironment();
 
@@ -13,6 +14,7 @@ const {docsBaseRoot, docsRoot} = getContentPaths(cwd);
 const outputDir = path.join(cwd, '.tmp');
 const outputFile = path.join(outputDir, 'search-records.json');
 const publicOutputFile = path.join(cwd, 'static', 'search-records.json');
+const publicSuggestionsFile = path.join(cwd, 'static', 'search-suggestions.json');
 const rawDocsDir = path.join(cwd, 'static', 'raw-docs');
 const llmsOutputFile = path.join(cwd, 'static', 'llms.txt');
 const llmsFullOutputFile = path.join(cwd, 'static', 'llms-full.txt');
@@ -374,6 +376,8 @@ async function main() {
   }
 
   const serializedRecords = JSON.stringify(records, null, 2);
+  const suggestionRecords = createSearchSuggestionRecords(documentRecords);
+  const serializedSuggestions = JSON.stringify(suggestionRecords);
   const siteUrl = (process.env.DOCS_URL ?? 'https://help-center.qingflow.com').replace(
     /\/$/,
     '',
@@ -423,13 +427,14 @@ async function main() {
     ...rawWrites,
     writeFile(outputFile, serializedRecords),
     writeFile(publicOutputFile, serializedRecords),
+    writeFile(publicSuggestionsFile, serializedSuggestions),
     writeFile(llmsOutputFile, llmsText),
     writeFile(llmsFullOutputFile, llmsFullText),
     writeFile(publicSynonymsFile, JSON.stringify(synonymGroups, null, 2)),
   ]);
 
   console.log(
-    `Generated ${records.length} search records, Markdown sources, llms.txt, and llms-full.txt`,
+    `Generated ${records.length} search records, ${suggestionRecords.length} search suggestions, Markdown sources, llms.txt, and llms-full.txt`,
   );
 }
 
