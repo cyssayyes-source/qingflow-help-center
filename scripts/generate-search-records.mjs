@@ -300,14 +300,16 @@ async function main() {
     const category = extractSection(relativePath, attributes);
     const businessPriority = inferBusinessPriority(relativePath, attributes);
     const tags = inferTags(relativePath, attributes, title);
-    const frontMatterKeywords = [
-      ...asStringArray(attributes.keywords),
-      ...asStringArray(attributes.search_aliases),
-    ];
+    const legacyNavigationPath = asStringArray(attributes.keywords);
+    const navigationPath = asStringArray(attributes.navigation_path);
+    const breadcrumbPath = navigationPath.length > 0
+      ? navigationPath
+      : legacyNavigationPath;
+    const searchAliases = asStringArray(attributes.search_aliases);
     const keywords = buildSynonymKeywords(
-      [title, category, ...tags, ...frontMatterKeywords],
+      [title, ...tags, ...searchAliases],
       synonymGroups,
-      [title, category, content, ...tags, ...frontMatterKeywords],
+      [title, content, ...tags, ...searchAliases],
     );
     const rawRelativePath = relativePath.replace(/\.(md|mdx)$/i, '.md');
     const rawOutputPath = path.join(rawDocsDir, rawRelativePath);
@@ -330,13 +332,12 @@ async function main() {
       title,
       document_title: title,
       section: category,
-      breadcrumb: buildBreadcrumb(category, frontMatterKeywords, title),
+      breadcrumb: buildBreadcrumb(category, breadcrumbPath, title),
       keywords,
       search_tokens: buildSearchTokens([
         title,
-        category,
         ...tags,
-        ...frontMatterKeywords,
+        ...searchAliases,
         content,
       ]),
       content,
@@ -366,9 +367,14 @@ async function main() {
         title: section.title,
         document_title: title,
         section: section.title,
-        breadcrumb: buildBreadcrumb(category, frontMatterKeywords, title, section.title),
+        breadcrumb: buildBreadcrumb(category, breadcrumbPath, title, section.title),
         keywords: sectionKeywords,
-        search_tokens: buildSearchTokens([section.title, section.body, title, category, ...tags]),
+        search_tokens: buildSearchTokens([
+          section.title,
+          section.body,
+          title,
+          ...tags,
+        ]),
         content: normalizeContent(section.body),
         url: `${buildUrl(relativePath, attributes)}#${section.slug}`,
         product: 'qingflow',

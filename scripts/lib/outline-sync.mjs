@@ -994,7 +994,7 @@ export function serializeGeneratedDocument(document, markdown, baseUrl) {
     document.url || `/doc/${document.urlId ?? document.id}`,
     normalizeOutlineUrl(baseUrl),
   );
-  const keywords = [...document.parents, document.title].filter(Boolean);
+  const navigationPath = (document.parents ?? []).filter(Boolean);
   return [
     '---',
     `title: ${JSON.stringify(document.title)}`,
@@ -1004,8 +1004,12 @@ export function serializeGeneratedDocument(document, markdown, baseUrl) {
     `source_url: ${JSON.stringify(sourceUrl)}`,
     `source_updated_at: ${JSON.stringify(document.updatedAt ?? '')}`,
     `outline_id: ${JSON.stringify(document.id)}`,
-    'keywords:',
-    ...keywords.map((keyword) => `  - ${JSON.stringify(keyword)}`),
+    ...(navigationPath.length > 0
+      ? [
+          'navigation_path:',
+          ...navigationPath.map((part) => `  - ${JSON.stringify(part)}`),
+        ]
+      : ['navigation_path: []']),
     '---',
     markdown,
     '',

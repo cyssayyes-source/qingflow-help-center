@@ -413,6 +413,23 @@ test('generated descriptions preserve Unicode and do not end in a Markdown escap
   assert.match(trailingEscape, /description: "a{179}"/);
 });
 
+test('generated documents keep navigation paths separate from search keywords', () => {
+  const generated = serializeGeneratedDocument(
+    {
+      id: docIdOne,
+      urlId: 'one',
+      title: '创建关联报表',
+      parents: ['帮助文档', '流程引擎', '节点通用属性'],
+      slug: '/product-guides/workflow-engine/related-report',
+    },
+    '正文中没有父级目录关键词。',
+    baseUrl,
+  );
+
+  assert.match(generated, /navigation_path:\n  - "帮助文档"\n  - "流程引擎"\n  - "节点通用属性"/);
+  assert.doesNotMatch(generated, /^keywords:/m);
+});
+
 test('Outline Markdown rejects executable MDX and unsafe JSX', async () => {
   await validateOutlineMarkdown('Safe **Markdown**\n\n<video src="https://example.com/video.mp4" controls />');
   await assert.rejects(

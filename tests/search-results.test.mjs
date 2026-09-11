@@ -4,6 +4,9 @@ import {
   addSearchHighlightToUrl,
   createMultiSearchSnippet,
   hasMatchingSection,
+  rankSearchDocuments,
+  rankSearchResults,
+  scoreSearchDocument,
   mergeSearchDocuments,
   selectGroupedSearchResult,
 } from '../src/utils/search-results.mjs';
@@ -23,6 +26,20 @@ test('search snippets keep distant matches as separate contextual excerpts', () 
   assert.match(snippet.text, /审批任务/);
   assert.match(snippet.text, /\.\.\. .*\.\.\./);
   assert.ok(snippet.matches.length >= 2);
+});
+
+test('search snippets prioritize rare query terms over repeated generic terms', () => {
+  const content = [
+    '文档解析可以读取文档内容。'.repeat(10),
+    '支持 md、markdown：Markdown 文件。',
+    '在 QMC 中导入导出文档。',
+  ].join(' ');
+  const snippet = createMultiSearchSnippet([{content}], ['导入 Markdown 文档']);
+
+  assert.match(snippet.text, /导入/);
+  assert.match(snippet.text, /markdown/i);
+  assert.ok(snippet.matches.length >= 3);
+  assert.ok(snippet.text.length <= 365);
 });
 
 test('grouped search chooses a relevant section instead of a generic sibling heading', () => {
@@ -126,4 +143,125 @@ test('search highlighting preserves an existing query string and anchor', () => 
     addSearchHighlightToUrl('/docs/approval/?lang=zh#settings', '审批 配置'),
     '/docs/approval/?lang=zh&search=%E5%AE%A1%E6%89%B9+%E9%85%8D%E7%BD%AE#settings',
   );
+});
+
+test('ranking prefers an exact document title over a body-only match', () => {
+  const titleMatch = {
+    record_type: 'document',
+    title: '导入 Markdown 文档',
+    document_title: '导入 Markdown 文档',
+    content: '支持多种导入方式。',
+    url: '/docs/import-markdown/',
+  };
+  const bodyMatch = {
+    record_type: 'document',
+    title: '数据导入说明',
+    document_title: '数据导入说明',
+    content: '导入 Markdown 文档前请准备好文件。',
+    url: '/docs/import-data/',
+  };
+
+  assert.ok(scoreSearchDocument(titleMatch, ['导入 Markdown 文档']) > scoreSearchDocument(bodyMatch, ['导入 Markdown 文档']));
+  assert.equal(rankSearchDocuments([bodyMatch, titleMatch], ['导入 Markdown 文档'])[0], titleMatch);
+});
+
+test('ranking keeps a matching subheading ahead of a generic parent-title result', () => {
+  const parentTitle = {
+    record_type: 'section',
+    title: '使用说明',
+    section: '使用说明',
+    document_title: '外部用户',
+    content: '配置外部用户的基本步骤。',
+    url: '/docs/external-users/#使用说明',
+  };
+  const subheading = {
+    record_type: 'section',
+    title: '管理员添加外部用户',
+    section: '管理员添加外部用户',
+    document_title: '外部用户',
+    content: '管理员可以邀请外部用户加入协作。',
+    url: '/docs/external-users/#管理员添加外部用户',
+  };
+
+  assert.equal(
+    rankSearchDocuments([parentTitle, subheading], ['管理员添加外部用户'])[0],
+    subheading,
+  );
+});
+
+test('direct query matches outrank synonym-only matches', () => {
+  const direct = {
+    record_type: 'document',
+    title: '数据导入',
+    content: '从文件导入数据。',
+    url: '/docs/import/',
+  };
+  const synonymOnly = {
+    record_type: 'document',
+    title: '批量录入',
+    content: '通过批量录入方式写入数据。',
+    url: '/docs/batch-entry/',
+  };
+
+  assert.ok(
+    scoreSearchDocument(direct, ['数据导入', '批量录入']) >
+      scoreSearchDocument(synonymOnly, ['数据导入', '批量录入']),
+  );
+});
+
+test('multi-term ranking prefers query terms that occur close together', () => {
+  const nearby = {
+    record_type: 'document',
+    title: '文件导入说明',
+    content: '支持导入 Markdown 文档后继续编辑。',
+    url: '/docs/nearby/',
+  };
+  const scattered = {
+    record_type: 'document',
+    title: '文件处理说明',
+    content: `支持导入文件。${'其他配置说明。'.repeat(80)}支持 Markdown 文件。${'其他配置说明。'.repeat(80)}文档处理完成。`,
+    url: '/docs/scattered/',
+  };
+
+  assert.ok(
+    scoreSearchDocument(nearby, ['导入 Markdown 文档']) >
+      scoreSearchDocument(scattered, ['导入 Markdown 文档']),
+  );
+  assert.equal(
+    rankSearchDocuments([scattered, nearby], ['导入 Markdown 文档'])[0],
+    nearby,
+  );
+});
+
+test('generic help-center category does not count as a document text match', () => {
+  const document = {
+    record_type: 'document',
+    title: '导入数据',
+    section: '帮助文档',
+    content: '从 Excel 文件批量导入数据。',
+    url: '/docs/import/',
+  };
+
+  assert.equal(scoreSearchDocument(document, ['文档']), 0);
+});
+
+test('grouped result ranking uses the best matching record in each group', () => {
+  const bodyGroup = {
+    document: {
+      record_type: 'document',
+      title: '数据处理',
+      content: '导入 Markdown 文档后可以继续处理。',
+      url: '/docs/process/',
+    },
+  };
+  const titleGroup = {
+    document: {
+      record_type: 'document',
+      title: '导入 Markdown 文档',
+      content: '导入文件。',
+      url: '/docs/import-markdown/',
+    },
+  };
+
+  assert.equal(rankSearchResults([bodyGroup, titleGroup], ['导入 Markdown 文档'])[0], titleGroup);
 });

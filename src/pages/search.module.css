@@ -236,11 +236,15 @@
 }
 
 .resultRow p {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   color: #686a70;
+  display: -webkit-box;
   font-size: 13px;
   line-height: 1.7;
   margin: 0;
   max-width: 700px;
+  overflow: hidden;
 }
 
 .resultHighlight {
