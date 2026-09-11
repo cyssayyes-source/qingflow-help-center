@@ -142,4 +142,5 @@ jobs:
           path: .tmp
 
       - name: Push records to Typesense
+        if: ${{ env.TYPESENSE_HOST != '' && env.TYPESENSE_ADMIN_API_KEY != '' }}
         run: npm run search:push
